@@ -14,8 +14,8 @@
 - [x] Implementar el panel administrativo estrictamente protegido con gestión de usuarios y roles admin/user.
 - [x] Añadir placeholders de integraciones externas exclusivamente configurables mediante variables de entorno.
 - [x] Redactar en español la documentación de configuración, variables de entorno, seguridad y siguientes pasos.
-- [ ] Crear y ejecutar pruebas unitarias de los procedimientos críticos y de las restricciones de autorización.
-- [ ] Verificar la interfaz en escritorio y móvil, corregir errores de compilación y preparar el proyecto para pruebas bajo solicitud del usuario.
+- [x] Crear y ejecutar pruebas unitarias de los procedimientos críticos y de las restricciones de autorización.
+- [x] Verificar la interfaz en escritorio y móvil, corregir errores de compilación y preparar el proyecto para pruebas bajo solicitud del usuario.
 - [x] Permitir la asignación y reasignación explícita de responsables en tareas desde backend y frontend.
 - [x] Usar el procedimiento protegido de descarga de archivos desde la interfaz, sin exponer enlaces directos desde el listado.
 - [x] Permitir que la persona propietaria incorpore miembros existentes a un proyecto para habilitar asignaciones colaborativas.
@@ -37,3 +37,9 @@
 - [x] Verificar la navegación, landing y documentación final del producto de prospección.
 - [x] Completar la auditoría de ejecución y el control de presupuesto durante el procesamiento.
 - [x] Verificar la exportación CSV y el contrato de salida para Google Sheets y aplicaciones posteriores.
+- [x] Ejecutar la suite Vitest y la comprobación de tipos del Local Opportunity Scanner.
+- [x] Revisar visualmente la landing, el dashboard y los flujos de prospección en escritorio y móvil.
+- [x] Corregir las incidencias de validación encontradas y confirmar una versión estable.
+- [x] Añadir pruebas automatizadas para la planificación de prospecciones, límites de presupuesto, control de consumo y exportación CSV.
+- [x] Documentar los procedimientos críticos del scanner y su cobertura de prueba asociada.
+- [x] Confirmar que la documentación en español conserva la matriz de procedimientos críticos y pruebas asociadas.

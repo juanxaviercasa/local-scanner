@@ -50,6 +50,17 @@ Nexo Local sólo actualiza los datos que genera. Los campos que correspondan a a
 
 El Opportunity Score se calcula con reglas deterministas sobre señales disponibles: ausencia de sitio web, sitio no disponible o mejorable, reseñas, valoración, teléfono, reservas y WhatsApp. La pantalla de configuración permite modificar los pesos del perfil base mediante JSON numérico. La ficha de cada negocio muestra las razones y los puntos que contribuyeron a su puntaje.
 
-## Próxima etapa de validación
+## Validación automatizada realizada
 
-Cuando se solicite, la fase de pruebas abarcará el flujo de previsualización y autorización de presupuesto, las restricciones de acceso, la persistencia de una ejecución parcial, el listado de oportunidades, la exportación CSV y la revisión visual responsive. No se ejecutará ninguna consulta de fuente externa durante esa fase sin la confirmación explícita del operador.
+La validación no ejecuta consultas de proveedores externos ni genera cargos. Cubre las reglas que deciden si una prospección puede iniciar, las protecciones de acceso, la puntuación y la seguridad del archivo de salida.
+
+| Procedimiento crítico | Prueba asociada | Comportamiento comprobado |
+|---|---|---|
+| Cierre de sesión | `server/auth.logout.test.ts` | Elimina la cookie de sesión con opciones seguras. |
+| Rutas protegidas y administración | `server/routers.authorization.test.ts` | Rechaza módulos privados sin sesión y las rutas administrativas para el rol `user`. |
+| Opportunity Score | `server/scoring.test.ts` | Prioriza ausencia de sitio, identifica rediseño y no formula una oportunidad digital sin señales verificadas. |
+| Previsualización y presupuesto | `server/scannerPolicies.test.ts` | Aplica el tope efectivo de resultados y bloquea consumo diario fuera de presupuesto. |
+| Consumo real | `server/scannerPolicies.test.ts` | Indica detener el procesamiento si el proveedor excede las operaciones o el coste autorizados. |
+| Exportación CSV | `server/scannerPolicies.test.ts` | Escapa comillas, serializa estructuras y neutraliza celdas que una hoja de cálculo podría interpretar como fórmulas. |
+
+Las pruebas se ejecutan con `pnpm test`; la comprobación estática se ejecuta con `pnpm exec tsc --noEmit`.

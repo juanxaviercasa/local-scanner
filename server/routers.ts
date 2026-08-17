@@ -33,6 +33,7 @@ import {
   upsertBusinessFromProvider,
 } from "./db";
 import { buildProviderQuery, findGoogleBusinesses, type SearchPlan } from "./googlePlacesProvider";
+import { actualUsageStaysWithinPlan, buildCsvDocument, calculateProspectingPlan, getConfiguredCostPerOperationCents } from "./scannerPolicies";
 import { DEFAULT_SCORING_THRESHOLDS, DEFAULT_SCORING_WEIGHTS, scoreBusiness } from "./scoring";
 
 const websiteStatusSchema = z.enum(["no_website", "website_found", "website_unreachable", "website_unknown"]);
@@ -63,25 +64,6 @@ function asNumberRecord(value: unknown, fallback: Record<string, number>) {
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => typeof item === "number")) as Record<string, number>;
 }
 
-function providerCostPerOperationCents() {
-  const configured = Number(process.env.NEXO_GOOGLE_PLACES_ESTIMATED_COST_CENTS ?? 0);
-  return Number.isFinite(configured) && configured >= 0 ? configured : 0;
-}
-
-function planCosts(input: SearchInput, budget: Awaited<ReturnType<typeof getOrCreateBudgetSettings>>, usage: Awaited<ReturnType<typeof getUsageSummary>>) {
-  // El proveedor devuelve una página de hasta 20 resultados en esta versión del flujo.
-  // Limitar aquí evita prometer un volumen superior al que se consultará realmente.
-  const requested = Math.min(input.maxResults, budget.maxBusinessesPerRun, 20);
-  const estimatedOperations = 2 + requested; // geocoding + search + one detail request per candidate
-  const estimatedCostCents = estimatedOperations * providerCostPerOperationCents();
-  const reasons: string[] = [];
-  if (input.maxResults > budget.maxBusinessesPerRun) reasons.push(`La configuración permite un máximo de ${budget.maxBusinessesPerRun} negocios por prospección.`);
-  if (usage.dailyRequests + estimatedOperations > budget.dailyRequestBudget) reasons.push("La ejecución supera el presupuesto diario de solicitudes.");
-  if (usage.monthlyRequests + estimatedOperations > budget.monthlyRequestBudget) reasons.push("La ejecución supera el presupuesto mensual de solicitudes.");
-  if (estimatedCostCents > budget.maxCostPerRunCents) reasons.push("El coste estimado supera el máximo permitido por prospección.");
-  return { requested, estimatedOperations, estimatedCostCents, allowed: reasons.length === 0, reasons };
-}
-
 function domainFromUrl(value?: string) {
   if (!value) return null;
   try { return new URL(value).hostname.replace(/^www\./, "").toLowerCase(); } catch { return null; }
@@ -91,15 +73,10 @@ function dataQualityOf(business: { address?: string; phone?: string; website?: s
   return [business.address, business.phone, business.website, business.rating !== undefined, business.reviewCount !== undefined].filter(Boolean).length * 20;
 }
 
-function csvSafe(value: unknown) {
-  const text = value === undefined || value === null ? "" : typeof value === "string" ? value : JSON.stringify(value);
-  return `"${text.replace(/"/g, '""')}"`;
-}
-
 async function executeRun(ownerId: number, input: SearchInput) {
   const budget = await getOrCreateBudgetSettings(ownerId);
   const usage = await getUsageSummary(ownerId);
-  const plan = planCosts(input, budget, usage);
+  const plan = calculateProspectingPlan(input, budget, usage, getConfiguredCostPerOperationCents());
   if (!plan.allowed) throw new TRPCError({ code: "PRECONDITION_FAILED", message: plan.reasons.join(" ") });
   const scoring = await getOrCreateDefaultScoringProfile(ownerId);
   const weights = asNumberRecord(scoring.weights, DEFAULT_SCORING_WEIGHTS);
@@ -120,12 +97,12 @@ async function executeRun(ownerId: number, input: SearchInput) {
   try {
     const providerPlan: SearchPlan = { country: input.country, city: input.city, district: input.district, referenceAddress: input.referenceAddress, category: input.primaryCategory, keywords: input.keywords, radiusMeters: input.radiusMeters, maxResults: plan.requested };
     const response = await findGoogleBusinesses(providerPlan);
-    await createUsageRecord({ ownerId, runId: run.id, provider: "google_maps", operation: "places_search_and_details", requestCount: response.operations, estimatedCostCents: response.operations * providerCostPerOperationCents() });
+    await createUsageRecord({ ownerId, runId: run.id, provider: "google_maps", operation: "places_search_and_details", requestCount: response.operations, estimatedCostCents: response.operations * getConfiguredCostPerOperationCents() });
     await createRunEvent({ runId: run.id, stage: "search", message: `La fuente autorizada devolvió ${response.businesses.length} resultados.` });
     await createRunEvent({ runId: run.id, stage: "details", message: `Se recibieron ${response.operations} operaciones de búsqueda y detalle desde el proveedor autorizado.` });
 
-    const actualCostCents = response.operations * providerCostPerOperationCents();
-    if (response.operations > plan.estimatedOperations || actualCostCents > budget.maxCostPerRunCents) {
+    const actualCostCents = response.operations * getConfiguredCostPerOperationCents();
+    if (!actualUsageStaysWithinPlan(response.operations, actualCostCents, plan, budget)) {
       await createRunEvent({
         runId: run.id,
         stage: "budget",
@@ -195,7 +172,10 @@ export const appRouter = router({
   settings: router({
     budget: protectedProcedure.query(({ ctx }) => getOrCreateBudgetSettings(ctx.user.id)),
     updateBudget: protectedProcedure.input(z.object({ dailyRequestBudget: z.number().int().min(1).max(100000).optional(), monthlyRequestBudget: z.number().int().min(1).max(1000000).optional(), maxCostPerRunCents: z.number().int().min(0).max(10000000).optional(), maxBusinessesPerRun: z.number().int().min(1).max(50).optional(), maxAiCallsPerRun: z.number().int().min(0).max(1000).optional() })).mutation(({ ctx, input }) => updateBudgetSettings(ctx.user.id, input)),
-    scoringProfiles: protectedProcedure.query(({ ctx }) => listScoringProfiles(ctx.user.id)),
+    scoringProfiles: protectedProcedure.query(async ({ ctx }) => {
+      await getOrCreateDefaultScoringProfile(ctx.user.id);
+      return listScoringProfiles(ctx.user.id);
+    }),
     updateScoring: protectedProcedure.input(z.object({ profileId: z.number().int().positive(), name: z.string().trim().min(2).max(120).optional(), weights: z.record(z.string(), z.number().min(-100).max(100)).optional(), thresholds: z.record(z.string(), z.number().min(0).max(100)).optional() })).mutation(({ ctx, input }) => { const { profileId, ...data } = input; return updateScoringProfile(ctx.user.id, profileId, data); }),
   }),
   searchProfiles: router({
@@ -208,7 +188,7 @@ export const appRouter = router({
   runs: router({
     plan: protectedProcedure.input(searchInput).query(async ({ ctx, input }) => {
       const [budget, usage, scoring] = await Promise.all([getOrCreateBudgetSettings(ctx.user.id), getUsageSummary(ctx.user.id), getOrCreateDefaultScoringProfile(ctx.user.id)]);
-      return { query: buildProviderQuery({ country: input.country, city: input.city, district: input.district, referenceAddress: input.referenceAddress, category: input.primaryCategory, keywords: input.keywords, radiusMeters: input.radiusMeters, maxResults: input.maxResults }), plan: planCosts(input, budget, usage), budget, usage, scoringProfile: { id: scoring.id, name: scoring.name } };
+      return { query: buildProviderQuery({ country: input.country, city: input.city, district: input.district, referenceAddress: input.referenceAddress, category: input.primaryCategory, keywords: input.keywords, radiusMeters: input.radiusMeters, maxResults: input.maxResults }), plan: calculateProspectingPlan(input, budget, usage, getConfiguredCostPerOperationCents()), budget, usage, scoringProfile: { id: scoring.id, name: scoring.name } };
     }),
     execute: protectedProcedure.input(searchInput.extend({ confirmed: z.literal(true) })).mutation(({ ctx, input }) => executeRun(ctx.user.id, input)),
     list: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional()).query(({ ctx, input }) => listProspectingRuns(ctx.user.id, input?.limit ?? 30)),
@@ -257,7 +237,7 @@ export const appRouter = router({
       const all = await listProspects(ctx.user.id, { limit: 5000 });
       const rows = all.filter(item => input.prospectIds.includes(item.prospect.id)).map(({ prospect, business }) => ({ lead_id: `lead_${business.id}`, business_name: business.name, category: business.category, location: [business.city, business.region, business.country].filter(Boolean).join(", "), address: business.address, phone: business.phone, website: business.website, website_status: business.websiteStatus, website_quality: business.websiteQuality, google_maps_url: business.googleMapsUrl, google_rating: business.rating, google_review_count: business.reviewCount, social_profiles: business.socialProfiles, whatsapp: business.whatsappUrl, booking: business.bookingUrl, opportunity_score: prospect.opportunityScore, business_attractiveness_score: prospect.businessAttractivenessScore, digital_opportunity_score: prospect.digitalOpportunityScore, website_opportunity_score: prospect.websiteOpportunityScore, commercial_potential_score: prospect.commercialPotentialScore, lead_potential_score: prospect.leadPotentialScore, urgency_score: prospect.urgencyScore, priority: prospect.priority, opportunity_types: prospect.opportunityTypes, opportunity_reasons: prospect.scoreReasons, ai_summary: prospect.analysisSummary, source: business.source, date_analyzed: prospect.lastCheckedAt.toISOString() }));
       const headers = Object.keys(rows[0] ?? { lead_id: "" });
-      return { filename: `nexo-prospectos-${new Date().toISOString().slice(0, 10)}.csv`, csv: [headers.join(","), ...rows.map(row => headers.map(header => csvSafe(row[header as keyof typeof row])).join(","))].join("\n") };
+      return { filename: `nexo-prospectos-${new Date().toISOString().slice(0, 10)}.csv`, csv: buildCsvDocument(rows) };
     }),
   }),
   profile: router({
