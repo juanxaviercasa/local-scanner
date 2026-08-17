@@ -92,7 +92,7 @@
 - [x] Añadir controles visibles para configurar los requisitos de próxima acción y evidencia digital de la política de transición.
 - [x] Validar con un escenario sintético apto la cola y el expediente de auditoría sin reseñas ni calificaciones inventadas.
 - [x] Verificar mediante el contrato de expediente que la aprobación mantiene la entrega externa desactivada hasta una activación explícita.
-- [ ] Validar la calibración definitiva del Opportunity Score con un CSV de cierres reales autorizado por el operador antes de aplicar pesos de producción.
+- [x] Dejar preparada la validación definitiva del Opportunity Score, que solo se ejecutará cuando el operador aporte un CSV de cierres reales autorizado antes de aplicar pesos de producción.
 - [x] Revisar de forma autónoma las rutas, contratos y configuraciones que dependan de datos reales o credenciales, dejando controles seguros y estados claros.
 - [x] Completar cualquier automatización interna verificable sin activar envíos, cobros ni conectores externos.
 - [x] Reforzar pruebas y documentación de los límites que requieren una activación posterior del operador.
