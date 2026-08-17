@@ -7,6 +7,7 @@ import { ENV } from "./_core/env";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
+  createProspectActivity,
   createQualificationTemplate,
   createRawSearchResult,
   createRunEvent,
@@ -24,6 +25,7 @@ import {
   getScannerDashboard,
   getUsageSummary,
   listProspectExports,
+  listProspectActivities,
   listProspectingRuns,
   listProspects,
   listRunEvents,
@@ -47,13 +49,21 @@ import { appendRowsToGoogleSheet, isGoogleSheetsConfigured } from "./googleSheet
 import { buildProviderQuery, findGoogleBusinesses, type SearchPlan } from "./googlePlacesProvider";
 import { actualUsageStaysWithinPlan, buildCsvDocument, calculateProspectingPlan, getConfiguredCostPerOperationCents } from "./scannerPolicies";
 import { DEFAULT_SCORING_THRESHOLDS, DEFAULT_SCORING_WEIGHTS, scoreBusiness } from "./scoring";
+import { calibrateScoringWeights } from "./scoringCalibration";
+import { buildProspectFollowup } from "./prospectFollowup";
 import { analyzePublicWebsite, isPageSpeedConfigured } from "./websiteAnalyzer";
+import { createValidationDemo } from "./demoValidation";
 
 const websiteStatusSchema = z.enum(["no_website", "website_found", "website_unreachable", "website_unknown"]);
 const prioritySchema = z.enum(["p0", "p1", "p2", "p3", "ignore"]);
 const prospectStatusSchema = z.enum(["new", "qualified", "rejected", "exported", "analysis_pending", "analyzed", "demo_pending", "contact_pending", "contacted", "converted", "lost"]);
 const runStatusSchema = z.enum(["queued", "running", "paused", "completed", "partial", "failed", "cancelled"]);
 export const authorizedSourceSchema = z.enum(["csv_import", "manual_entry", "google_maps"]);
+const calibrationRowSchema = z.object({
+  outcome: z.enum(["won", "lost"]),
+  noWebsite: z.boolean().nullable(), weakWebsite: z.boolean().nullable(), reviewCount: z.number().int().min(0).max(1000000).nullable(), rating: z.number().min(0).max(5).nullable(),
+  hasPhone: z.boolean().nullable(), hasBooking: z.boolean().nullable(), hasWhatsapp: z.boolean().nullable(), commercialPotential: z.enum(["low", "medium", "high", "very_high"]).nullable(),
+});
 
 const searchInput = z.object({
   country: z.string().trim().min(2).max(80),
@@ -334,12 +344,28 @@ export const appRouter = router({
       return listScoringProfiles(ctx.user.id);
     }),
     updateScoring: protectedProcedure.input(z.object({ profileId: z.number().int().positive(), name: z.string().trim().min(2).max(120).optional(), weights: z.record(z.string(), z.number().min(-100).max(100)).optional(), thresholds: z.record(z.string(), z.number().min(0).max(100)).optional() })).mutation(({ ctx, input }) => { const { profileId, ...data } = input; return updateScoringProfile(ctx.user.id, profileId, data); }),
+    calibrateScoring: protectedProcedure.input(z.object({ rows: z.array(calibrationRowSchema).min(8).max(500) })).mutation(async ({ ctx, input }) => {
+      const profile = await getOrCreateDefaultScoringProfile(ctx.user.id);
+      return calibrateScoringWeights(input.rows, asNumberRecord(profile.weights, DEFAULT_SCORING_WEIGHTS), asNumberRecord(profile.thresholds, DEFAULT_SCORING_THRESHOLDS));
+    }),
   }),
   searchProfiles: router({
     list: protectedProcedure.query(({ ctx }) => listSearchProfiles(ctx.user.id)),
     create: protectedProcedure.input(searchInput.extend({ name: z.string().trim().min(2).max(120), provider: authorizedSourceSchema })).mutation(({ ctx, input }) => {
       const { name, ...profile } = input;
       return createSearchProfile(ctx.user.id, { name, ...profile });
+    }),
+  }),
+  demo: router({
+    createValidation: protectedProcedure.mutation(async ({ ctx }) => {
+      try {
+        return await createValidationDemo(ctx.user.id, { listProspects, importBusinesses, updateRunProspect, createProspectActivity });
+      } catch (error) {
+        if (error instanceof Error && error.message === "No se pudo crear el prospecto de demostración.") {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+        }
+        throw error;
+      }
     }),
   }),
   runs: router({
@@ -374,12 +400,17 @@ export const appRouter = router({
       if (!value) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
       return value;
     }),
-    update: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), status: prospectStatusSchema.optional(), notes: z.string().max(10000).nullable().optional() })).mutation(async ({ ctx, input }) => {
-      const { prospectId, ...changes } = input;
-      const updated = await updateRunProspect(ctx.user.id, prospectId, changes);
+    update: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), status: prospectStatusSchema.optional(), notes: z.string().max(10000).nullable().optional(), commercialNote: z.string().trim().max(2000).optional(), nextActionLabel: z.string().trim().max(240).nullable().optional(), nextActionAt: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => {
+      const current = await getProspect(ctx.user.id, input.prospectId);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
+      const { prospectId, commercialNote, ...changes } = input;
+      const followup = buildProspectFollowup(current.prospect, { ...changes, commercialNote });
+      const updated = await updateRunProspect(ctx.user.id, prospectId, { ...changes, ...(followup.markContactedAt ? { lastContactedAt: new Date() } : {}) });
       if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
+      if (followup.hasCommercialChange) await createProspectActivity({ ownerId: ctx.user.id, prospectId, ...followup.activity });
       return updated;
     }),
+    activities: protectedProcedure.input(z.object({ prospectId: z.number().int().positive() })).query(({ ctx, input }) => listProspectActivities(ctx.user.id, input.prospectId)),
     exportRows: protectedProcedure.input(z.object({ prospectIds: z.array(z.number().int().positive()).min(1).max(500) })).query(async ({ ctx, input }) => {
       const all = await listProspects(ctx.user.id, { limit: 5000 });
       const selected = all.filter(item => input.prospectIds.includes(item.prospect.id));

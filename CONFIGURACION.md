@@ -73,6 +73,16 @@ Nexo Local sólo actualiza los datos que genera. Los campos que correspondan a a
 
 El Opportunity Score se calcula con reglas deterministas sobre señales disponibles: ausencia de sitio web, sitio no disponible o mejorable, reseñas, valoración, teléfono, reservas y WhatsApp. La pantalla de configuración permite modificar los pesos del perfil base mediante JSON numérico. La ficha de cada negocio muestra las razones y los puntos que contribuyeron a su puntaje.
 
+### Calibración local con cierres reales
+
+La sección **Calibrar con resultados reales** acepta un CSV local de oportunidades ya cerradas. El archivo debe incluir una columna `resultado` con `ganado` o `perdido`; puede añadir las columnas `sin_sitio`, `sitio_debil`, `resenas`, `calificacion`, `telefono`, `reservas`, `whatsapp` y `potencial_comercial` si esos datos están disponibles. Las celdas booleanas aceptan `sí`, `true`, `1` o `x`.
+
+El archivo se interpreta en el navegador y solo se envían al backend de la aplicación las filas necesarias para calcular recomendaciones. No se sube a almacenamiento ni se comparte con proveedores externos. La recomendación compara la tasa de conversión de cada señal con la tasa de conversión de la muestra; únicamente considera factores con evidencia suficiente y **no se aplica** hasta que el operador pulse `Aplicar pesos sugeridos`.
+
+### Seguimiento comercial interno
+
+Cada prospecto puede avanzar entre los estados de cualificación, demo, contacto, conversión o descarte ya disponibles. La ficha permite registrar una nota comercial, una próxima acción con fecha y hora, y las notas internas persistentes. Cada cambio comercial crea una entrada de bitácora con el estado anterior y posterior, la acción programada y la fecha de registro. Cuando el estado cambia por primera vez a `Contactado`, se conserva también la fecha del contacto. Estas operaciones no envían mensajes ni modifican datos procedentes de la fuente.
+
 ## Validación automatizada realizada
 
 La validación no ejecuta consultas de proveedores externos ni genera cargos. Cubre las reglas que deciden si una prospección puede iniciar, las protecciones de acceso, la puntuación y la seguridad del archivo de salida.
@@ -88,5 +98,7 @@ La validación no ejecuta consultas de proveedores externos ni genera cargos. Cu
 | Análisis web público | `server/websiteAnalyzer.test.ts` | Permite revisar solo destinos públicos y conserva la alternativa básica mientras PageSpeed permanezca como placeholder. |
 | Google Sheets opcional | `server/googleSheets.test.ts` | Formatea de forma segura las celdas estructuradas y mantiene la hoja inactiva sin el interruptor expreso. |
 | Borradores de cualificación | `server/templates.test.ts` | Sustituye únicamente variables conocidas y no inicia ninguna comunicación. |
+| Calibración CSV | `server/scoringCalibration.test.ts` | Calcula recomendaciones explicables desde resultados etiquetados y exige una muestra mínima. |
+| Seguimiento comercial | `server/prospectFollowup.test.ts` | Conserva próximas acciones, registra el cambio de estado y detecta el primer contacto. |
 
 Las pruebas se ejecutan con `pnpm test`; la comprobación estática se ejecuta con `pnpm exec tsc --noEmit`.

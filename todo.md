@@ -57,6 +57,22 @@
 - [x] Añadir una prueba automatizada que cubra la fuente autorizada de un perfil persistente.
 - [x] Añadir una prueba de ida y vuelta del contrato de perfiles que confirme que la fuente seleccionada se guarda y se devuelve.
 - [x] Conectar el doble de prueba de perfiles para verificar que el listado devuelve exactamente la fuente creada en el mismo flujo.
+- [x] Diseñar una importación CSV guiada que permita revisar señales y calibrar los pesos del Opportunity Score sin usar APIs externas.
+- [x] Implementar el análisis de calibración y la aplicación controlada de pesos de puntuación desde datos CSV importados.
+- [x] Añadir estados comerciales estructurados, fecha de siguiente acción y actividad de seguimiento para prospectos cualificados.
+- [x] Validar con pruebas automatizadas y revisión visual los flujos de calibración CSV y seguimiento comercial.
+- [ ] Verificar visualmente la recomendación de calibración con un CSV de cierres autorizado cargado por el operador antes de aplicar pesos.
+- [ ] Verificar visualmente en una ficha real el estado comercial, la próxima acción y la bitácora de seguimiento.
+- [x] Crear datos de demostración claramente identificados, sin reseñas ni calificaciones ficticias, para validar los flujos pendientes.
+- [x] Verificar visualmente con los datos de demostración la recomendación CSV y la bitácora de seguimiento comercial.
+- [x] Crear datos de demostración claramente identificados, sin reseñas ni calificaciones ficticias, para validar los flujos pendientes.
+- [x] Verificar visualmente con los datos de demostración la recomendación CSV y la bitácora de seguimiento comercial.
+- [x] Añadir una prueba automatizada que confirme que el ejemplo de validación no incorpora reseñas ni calificaciones ficticias.
+- [x] Confirmar que el procedimiento de demostración carga `createProspectActivity` en tiempo de ejecución sin errores de módulo.
+- [x] Añadir una prueba de contrato del procedimiento de demostración que cubra la creación y su actividad de seguimiento.
+- [x] Repetir la comprobación visual del flujo de demostración después de confirmar la carga en tiempo de ejecución.
+- [x] Añadir una prueba de contrato tRPC de `demo.createValidation` que compruebe la respuesta y el registro de seguimiento.
+- [x] Registrar en la validación final la evidencia del procedimiento tRPC de demostración, separada de la prueba unitaria del helper.
 - [x] Documentar que no se realiza scraping de Google Maps ni se eluden sus controles de acceso.
 - [x] Corregir la serialización de valores estructurados en la exportación opcional a Google Sheets.
 - [x] Garantizar que la aplicación no requiere ni intenta usar APIs de pago en su operación predeterminada.

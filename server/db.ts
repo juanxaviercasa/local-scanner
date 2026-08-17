@@ -10,6 +10,7 @@ import {
   projectFiles,
   projects,
   projectMembers,
+  prospectActivities,
   prospectExports,
   rawSearchResults,
   runEvents,
@@ -568,13 +569,28 @@ export async function getProspect(ownerId: number, prospectId: number) {
   return rows.find(row => row.prospect.id === prospectId);
 }
 
-export async function updateRunProspect(ownerId: number, prospectId: number, data: Partial<{ status: "new" | "qualified" | "rejected" | "exported" | "analysis_pending" | "analyzed" | "demo_pending" | "contact_pending" | "contacted" | "converted" | "lost"; notes: string | null }>) {
+export async function updateRunProspect(ownerId: number, prospectId: number, data: Partial<{ status: "new" | "qualified" | "rejected" | "exported" | "analysis_pending" | "analyzed" | "demo_pending" | "contact_pending" | "contacted" | "converted" | "lost"; notes: string | null; nextActionLabel: string | null; nextActionAt: Date | null; lastContactedAt: Date | null }>) {
   const prospect = await getProspect(ownerId, prospectId);
   if (!prospect) return undefined;
   const db = await getDb();
   if (!db) return undefined;
   await db.update(runProspects).set(data).where(eq(runProspects.id, prospectId));
   return getProspect(ownerId, prospectId);
+}
+
+export async function createProspectActivity(data: { ownerId: number; prospectId: number; action: string; note?: string | null; previousStatus?: string | null; nextStatus?: string | null; nextActionLabel?: string | null; nextActionAt?: Date | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const result = await db.insert(prospectActivities).values(data);
+  return (await db.select().from(prospectActivities).where(eq(prospectActivities.id, Number(result[0].insertId))).limit(1))[0]!;
+}
+
+export async function listProspectActivities(ownerId: number, prospectId: number) {
+  const prospect = await getProspect(ownerId, prospectId);
+  if (!prospect) return [];
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(prospectActivities).where(and(eq(prospectActivities.ownerId, ownerId), eq(prospectActivities.prospectId, prospectId))).orderBy(desc(prospectActivities.createdAt));
 }
 
 export async function updateAnalyzedProspect(ownerId: number, prospectId: number, data: {

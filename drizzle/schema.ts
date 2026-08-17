@@ -197,6 +197,9 @@ export const runProspects = mysqlTable("runProspects", {
   analysisSummary: text("analysisSummary"),
   analysisConfidence: decimal("analysisConfidence", { precision: 3, scale: 2 }),
   notes: text("notes"),
+  nextActionLabel: varchar("nextActionLabel", { length: 240 }),
+  nextActionAt: timestamp("nextActionAt"),
+  lastContactedAt: timestamp("lastContactedAt"),
   lastCheckedAt: timestamp("lastCheckedAt").defaultNow().notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -243,6 +246,20 @@ export const prospectExports = mysqlTable("prospectExports", {
   errorMessage: varchar("errorMessage", { length: 1000 }),
   exportedAt: timestamp("exportedAt").defaultNow().notNull(),
 }, table => [index("prospect_exports_owner_idx").on(table.ownerId, table.exportedAt), index("prospect_exports_prospect_idx").on(table.prospectId)]);
+
+/** Bitácora interna de cada cambio comercial y próxima acción de un prospecto. */
+export const prospectActivities = mysqlTable("prospectActivities", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  prospectId: int("prospectId").notNull(),
+  action: varchar("action", { length: 80 }).notNull(),
+  note: text("note"),
+  previousStatus: varchar("previousStatus", { length: 40 }),
+  nextStatus: varchar("nextStatus", { length: 40 }),
+  nextActionLabel: varchar("nextActionLabel", { length: 240 }),
+  nextActionAt: timestamp("nextActionAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, table => [index("prospect_activities_prospect_created_idx").on(table.prospectId, table.createdAt), index("prospect_activities_owner_idx").on(table.ownerId, table.createdAt)]);
 
 /** Historial de análisis técnico sobre un sitio público indicado por el propio negocio. */
 export const websiteAnalyses = mysqlTable("websiteAnalyses", {
