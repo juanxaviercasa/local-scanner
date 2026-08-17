@@ -121,3 +121,9 @@
 - [x] Corregir la anchura del selector sectorial en escritorio para evitar que el valor activo quede truncado.
 - [x] Reforzar y validar la visibilidad completa del selector sectorial para etiquetas de plantilla largas en escritorio.
 - [x] Mostrar y comprobar el nombre completo de la plantilla activa fuera del selector nativo para evitar cualquier truncamiento visual.
+- [x] Persistir una configuración protegida por cuenta para el endpoint y preferencias de entrega del webhook SaaS, sin activar envíos automáticamente.
+- [x] Añadir un panel de integración SaaS con validación de endpoint, estado claro y pasos seguros de activación.
+- [x] Mejorar la interfaz del expediente PDF con estado de preparación, resumen de alcance y descarga accesible por oportunidad.
+- [x] Ampliar el PDF con portada operativa, ficha de negocio, criterios de transición y notas de entrega manual o webhook.
+- [x] Cubrir las nuevas rutas, validaciones de URL y experiencia de expedientes con pruebas automatizadas y revisión responsive.
+- [x] Añadir al PDF una sección explícita de criterios de transición que muestre cumplimiento y razones de aptitud antes de la entrega.

@@ -7,6 +7,11 @@ describe("buildAuditDossierPdf", () => {
     const pdf = await buildAuditDossierPdf({
       business: { name: "Estudio Norte", category: "Arquitectura", city: "Lima", country: "Perú" },
       opportunity: { status: "qualified", priority: "p1", opportunityScore: 86 },
+      readiness: {
+        eligible: false,
+        criteria: { score: 86, minimumOpportunityScore: 70, requireNextAction: true, hasNextAction: false, requireDigitalEvidence: true, hasDigitalEvidence: true },
+        reasons: ["Falta registrar una próxima acción comercial con fecha."],
+      },
       auditBrief: {
         executiveSummary: "Existe una oportunidad de mejorar la captación desde el sitio web.",
         recommendedEngagement: { title: "Mejora estratégica", rationale: "Hay señales verificables de mejora.", suggestedScope: ["Auditoría UX"] },

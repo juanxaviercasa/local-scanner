@@ -18,8 +18,7 @@
 | `NEXO_GOOGLE_SHEETS_SPREADSHEET_ID` | No | Identificador de la hoja de cálculo destino. La cuenta de servicio debe tener acceso de Editor. | `1EjemploHoja...` |
 | `NEXO_GOOGLE_SHEETS_TAB` | No | Nombre de la pestaña destino; si se omite, se utiliza `Prospectos`. | `Prospectos` |
 | `NEXO_GOOGLE_PAGESPEED_API_KEY` | No | Clave de PageSpeed Insights. Añade métricas Lighthouse al análisis de sitio; sin ella se mantiene una comprobación pública básica. | `completar-como-secreto` |
-| `NEXO_HANDOFF_WEBHOOK_URL` | No | URL autorizada del SaaS externo que recibirá expedientes de auditoría. Por ahora el producto la trata como configuración de placeholder y no realiza envíos automáticos. | `https://tu-saas.example/webhooks/nexo` |
-| `NEXO_ENABLE_HANDOFF_CONNECTOR` | No | Interruptor explícito de la futura entrega externa de expedientes. Debe ser exactamente `true` junto con la URL de entrega. | `true` |
+| `NEXO_HANDOFF_WEBHOOK_SECRET` | No | Secreto de firma HMAC SHA-256 para que el SaaS receptor verifique la autenticidad e integridad de cada entrega. No se guarda en la base de datos ni se expone en la interfaz. | `completar-como-secreto` |
 
 Las variables se añaden desde el panel de secretos del proyecto. **No** se deben colocar en archivos `.env` versionados ni dentro de código de cliente. La ruta `integrations.status` informa únicamente si un placeholder está activo; nunca revela valores. Disponer de una clave o de una cuenta de servicio no activa por sí solo ninguna integración: se requiere además `NEXO_ENABLE_PAID_CONNECTORS=true`.
 
@@ -87,9 +86,11 @@ Cada prospecto puede avanzar entre los estados de cualificación, demo, contacto
 
 ### Transición a auditoría y SaaS posterior
 
-La ruta **Transición a auditoría** implementa la siguiente fase prevista del producto: filtra oportunidades por Opportunity Score, estado comercial, próxima acción y evidencia digital; permite preparar una cola; requiere aprobar el expediente; y descarga un JSON de auditoría para la entrega manual al SaaS que crea o mejora el sitio web. El umbral, el destino y los requisitos de próxima acción o evidencia digital son configurables por la persona operadora.
+La ruta **Transición a auditoría** implementa la siguiente fase prevista del producto: filtra oportunidades por Opportunity Score, estado comercial, próxima acción y evidencia digital; permite preparar una cola; requiere aprobar el expediente; y descarga un JSON o un PDF de auditoría para revisión y entrega manual. El PDF incorpora portada, ficha pública del negocio, score, recomendación, alcance sectorial, agenda y límites operativos. El umbral, el destino y los requisitos de próxima acción o evidencia digital son configurables por la persona operadora.
 
-El conector externo se mantiene como **placeholder inactivo** incluso si existe una URL. Solo puede considerarse activo al configurar `NEXO_HANDOFF_WEBHOOK_URL` y `NEXO_ENABLE_HANDOFF_CONNECTOR=true`; hasta entonces no se transmite información a terceros. El detalle operativo y la evidencia de validación se encuentran en `OPERACION_TRANSICION.md`.
+El panel **Integración SaaS** guarda por cuenta el nombre de destino y una URL HTTPS pública. El endpoint se valida para impedir HTTP, destinos locales y resoluciones privadas. Para habilitarlo, se debe añadir además `NEXO_HANDOFF_WEBHOOK_SECRET` desde los secretos del proyecto. Cuando ambos requisitos están presentes, cada entrega sigue requiriendo que una persona pulse **Entregar al SaaS** y confirme la acción; no existen entregas automáticas, recurrentes ni disparadas por eventos.
+
+Cada solicitud usa `POST` con el evento `audit.dossier.ready`, un identificador de entrega, marca temporal ISO 8601 y la cabecera `x-nexo-signature: sha256=<firma>`. La firma se calcula sobre `marca-temporal.cuerpo-JSON`. El SaaS receptor debe recalcularla con el mismo secreto antes de aceptar el expediente. La aplicación conserva solo el último estado, fecha y error resumido de entrega; nunca persiste el secreto. El detalle operativo y la evidencia de validación se encuentran en `OPERACION_TRANSICION.md`.
 
 ## Validación automatizada realizada
 
@@ -109,5 +110,7 @@ La validación no ejecuta consultas de proveedores externos ni genera cargos. Cu
 | Calibración CSV | `server/scoringCalibration.test.ts` | Calcula recomendaciones explicables desde resultados etiquetados y exige una muestra mínima. |
 | Seguimiento comercial | `server/prospectFollowup.test.ts` | Conserva próximas acciones, registra el cambio de estado y detecta el primer contacto. |
 | Protección de demostraciones | `server/demoGuard.test.ts`, `server/demoHandoff.router.test.ts` | Rechaza registros `isDemo` en exportaciones, cola de auditoría y expediente antes de que puedan entrar en un flujo comercial. |
+| Webhook SaaS | `server/handoffIntegration.router.test.ts`, `server/handoffWebhook.test.ts` | Conserva el endpoint por cuenta, no revela secretos, bloquea activación sin secreto y rechaza destinos sin HTTPS o privados. |
+| Expediente PDF | `server/auditPdf.test.ts` | Genera un PDF legible con datos operativos y recordatorio de revisión humana. |
 
 Las pruebas se ejecutan con `pnpm test`; la comprobación estática se ejecuta con `pnpm exec tsc --noEmit`.

@@ -14,4 +14,5 @@ export const ENV = {
   paidConnectorsEnabled: process.env.NEXO_ENABLE_PAID_CONNECTORS === "true",
   handoffConnectorEnabled: process.env.NEXO_ENABLE_HANDOFF_CONNECTOR === "true",
   handoffWebhookUrl: process.env.NEXO_HANDOFF_WEBHOOK_URL ?? "",
+  handoffWebhookSecret: process.env.NEXO_HANDOFF_WEBHOOK_SECRET ?? "",
 };

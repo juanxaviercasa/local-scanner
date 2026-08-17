@@ -5,6 +5,7 @@ import {
   budgetSettings,
   businesses,
   categoryProfiles,
+  handoffIntegrations,
   handoffPolicies,
   InsertUser,
   prospectingRuns,
@@ -631,6 +632,30 @@ export async function updateHandoffPolicy(ownerId: number, data: Partial<{ minim
   if (!db) throw new Error("La base de datos no está disponible.");
   await db.update(handoffPolicies).set(data).where(eq(handoffPolicies.id, current.id));
   return getOrCreateHandoffPolicy(ownerId);
+}
+
+export async function getOrCreateHandoffIntegration(ownerId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const current = (await db.select().from(handoffIntegrations).where(eq(handoffIntegrations.ownerId, ownerId)).limit(1))[0];
+  if (current) return current;
+  const result = await db.insert(handoffIntegrations).values({ ownerId });
+  return (await db.select().from(handoffIntegrations).where(eq(handoffIntegrations.id, Number(result[0].insertId))).limit(1))[0]!;
+}
+
+export async function updateHandoffIntegration(ownerId: number, data: Partial<{
+  displayName: string;
+  webhookUrl: string | null;
+  isEnabled: number;
+  lastDeliveryAt: Date | null;
+  lastDeliveryStatus: "not_sent" | "succeeded" | "failed";
+  lastDeliveryError: string | null;
+}>) {
+  const current = await getOrCreateHandoffIntegration(ownerId);
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  await db.update(handoffIntegrations).set(data).where(eq(handoffIntegrations.id, current.id));
+  return getOrCreateHandoffIntegration(ownerId);
 }
 
 export async function getProspectHandoff(ownerId: number, prospectId: number) {

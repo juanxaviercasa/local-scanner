@@ -14,12 +14,13 @@ vi.mock("@/components/ScannerUI", () => ({
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    useUtils: () => ({ handoffs: { policy: { invalidate }, list: { invalidate } }, prospects: { list: { invalidate } }, scopeTemplates: { list: { invalidate } } }),
+    useUtils: () => ({ handoffs: { policy: { invalidate }, list: { invalidate }, integration: { invalidate }, connectorStatus: { invalidate } }, prospects: { list: { invalidate } }, scopeTemplates: { list: { invalidate } } }),
     handoffs: {
       policy: { useQuery: () => ({ data: { minimumOpportunityScore: 70, destinationLabel: "SaaS de auditoría web", requireNextAction: 1, requireDigitalEvidence: 1 } }) },
       connectorStatus: { useQuery: () => ({ data: { state: "placeholder_inactivo" } }) },
+      integration: { useQuery: () => ({ data: { displayName: "SaaS de auditoría web", webhookUrl: null, isEnabled: 0, hasSigningSecret: false, lastDeliveryStatus: "not_sent", lastDeliveryError: null } }) },
       list: { useQuery: () => ({ data: [] }) },
-      updatePolicy: { useMutation: () => mutation }, queue: { useMutation: () => mutation }, approve: { useMutation: () => mutation }, dossier: { useMutation: () => mutation }, dossierPdf: { useMutation: () => mutation },
+      updatePolicy: { useMutation: () => mutation }, updateIntegration: { useMutation: () => mutation }, queue: { useMutation: () => mutation }, approve: { useMutation: () => mutation }, dossier: { useMutation: () => mutation }, dossierPdf: { useMutation: () => mutation }, sendToSaas: { useMutation: () => mutation },
     },
     prospects: { list: { useQuery: () => ({ data: [] }) } },
     scopeTemplates: { list: { useQuery: () => ({ data: [{ id: 8, name: "Servicios profesionales con captación y agenda digital", sector: "Consultoría especializada", overview: "Alcance amplio para una presencia digital de servicios.", deliverables: ["Página de servicios"], successMetrics: ["Solicitudes cualificadas"], isDefault: 1 }] }) }, create: { useMutation: () => mutation }, update: { useMutation: () => mutation }, remove: { useMutation: () => mutation } },
@@ -37,6 +38,9 @@ describe("Handoffs", () => {
     expect(screen.getByText("Expediente de auditoría 2.0")).toBeTruthy();
     expect(screen.getByText("Una base concreta para crear o mejorar un sitio web")).toBeTruthy();
     expect(screen.getByText("Personaliza lo que recibirá el SaaS")).toBeTruthy();
+    expect(screen.getByText("Destino del webhook de auditoría")).toBeTruthy();
+    expect(screen.getByLabelText("URL pública HTTPS del webhook")).toBeTruthy();
+    expect(screen.getByText(/Falta añadir el secreto de firma antes de activar el envío/i)).toBeTruthy();
     const scopeSelector = screen.getByRole("combobox", { name: "Plantilla de alcance sectorial" }) as HTMLSelectElement;
     expect(scopeSelector.value).toBe("8");
     expect(screen.getByRole("option", { name: "Servicios profesionales con captación y agenda digital · Consultoría especializada" })).toBeTruthy();

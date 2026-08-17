@@ -273,6 +273,19 @@ export const handoffPolicies = mysqlTable("handoffPolicies", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+/** Destino SaaS de auditoría por cuenta. El secreto de firma permanece exclusivamente en el entorno del servidor. */
+export const handoffIntegrations = mysqlTable("handoffIntegrations", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull().unique(),
+  displayName: varchar("displayName", { length: 160 }).default("SaaS de auditoría web").notNull(),
+  webhookUrl: varchar("webhookUrl", { length: 2048 }),
+  isEnabled: int("isEnabled").default(0).notNull(),
+  lastDeliveryAt: timestamp("lastDeliveryAt"),
+  lastDeliveryStatus: mysqlEnum("lastDeliveryStatus", ["not_sent", "succeeded", "failed"]).default("not_sent").notNull(),
+  lastDeliveryError: varchar("lastDeliveryError", { length: 1000 }),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 /** Cola interna de oportunidades aprobadas para la siguiente fase de auditoría. */
 export const prospectHandoffs = mysqlTable("prospectHandoffs", {
   id: int("id").autoincrement().primaryKey(),

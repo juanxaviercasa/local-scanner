@@ -22,6 +22,7 @@ import {
   getOrCreateBudgetSettings,
   getOrCreateDefaultScoringProfile,
   getOrCreateGuideProgress,
+  getOrCreateHandoffIntegration,
   getOrCreateHandoffPolicy,
   getOrCreateQualificationTemplates,
   getOrCreateWebScopeTemplates,
@@ -48,6 +49,7 @@ import {
   updateHandoffPolicy,
   updateBusinessWebsiteAnalysis,
   updateGuideProgress,
+  updateHandoffIntegration,
   updateQualificationTemplate,
   updateRunProspect,
   updateScoringProfile,
@@ -69,6 +71,7 @@ import { analyzePublicWebsite, isPageSpeedConfigured } from "./websiteAnalyzer";
 import { createValidationDemo } from "./demoValidation";
 import { buildAuditDossier, evaluateHandoffEligibility } from "./handoff";
 import { buildAuditDossierPdf } from "./auditPdf";
+import { deliverSignedWebhook, validateWebhookUrl } from "./handoffWebhook";
 
 const websiteStatusSchema = z.enum(["no_website", "website_found", "website_unreachable", "website_unknown"]);
 const prioritySchema = z.enum(["p0", "p1", "p2", "p3", "ignore"]);
@@ -78,6 +81,7 @@ const dueStateSchema = z.enum(["overdue", "today", "upcoming", "none"]);
 const runStatusSchema = z.enum(["queued", "running", "paused", "completed", "partial", "failed", "cancelled"]);
 export const authorizedSourceSchema = z.enum(["csv_import", "manual_entry", "google_maps"]);
 const scopeTemplateInput = z.object({ name: z.string().trim().min(2).max(140), sector: z.string().trim().min(2).max(100), overview: z.string().trim().min(10).max(5000), deliverables: z.array(z.string().trim().min(2).max(300)).min(1).max(20), successMetrics: z.array(z.string().trim().min(2).max(300)).min(1).max(20), isDefault: z.number().int().min(0).max(1).optional() });
+const handoffIntegrationInput = z.object({ displayName: z.string().trim().min(2).max(160), webhookUrl: z.string().trim().url().max(2048).nullable(), isEnabled: z.boolean() });
 const calibrationRowSchema = z.object({
   outcome: z.enum(["won", "lost"]),
   noWebsite: z.boolean().nullable(), weakWebsite: z.boolean().nullable(), reviewCount: z.number().int().min(0).max(1000000).nullable(), rating: z.number().min(0).max(5).nullable(),
@@ -518,6 +522,16 @@ export const appRouter = router({
   handoffs: router({
     policy: protectedProcedure.query(({ ctx }) => getOrCreateHandoffPolicy(ctx.user.id)),
     updatePolicy: protectedProcedure.input(z.object({ minimumOpportunityScore: z.number().int().min(0).max(100).optional(), requireNextAction: z.boolean().optional(), requireDigitalEvidence: z.boolean().optional(), destinationLabel: z.string().trim().min(2).max(160).optional() })).mutation(({ ctx, input }) => updateHandoffPolicy(ctx.user.id, { ...(input.minimumOpportunityScore === undefined ? {} : { minimumOpportunityScore: input.minimumOpportunityScore }), ...(input.destinationLabel === undefined ? {} : { destinationLabel: input.destinationLabel }), ...(input.requireNextAction === undefined ? {} : { requireNextAction: input.requireNextAction ? 1 : 0 }), ...(input.requireDigitalEvidence === undefined ? {} : { requireDigitalEvidence: input.requireDigitalEvidence ? 1 : 0 }) })),
+    integration: protectedProcedure.query(async ({ ctx }) => {
+      const integration = await getOrCreateHandoffIntegration(ctx.user.id);
+      return { ...integration, hasSigningSecret: Boolean(ENV.handoffWebhookSecret) };
+    }),
+    updateIntegration: protectedProcedure.input(handoffIntegrationInput).mutation(async ({ ctx, input }) => {
+      const webhookUrl = input.webhookUrl ? await validateWebhookUrl(input.webhookUrl) : null;
+      if (input.isEnabled && !webhookUrl) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Introduce una URL HTTPS pública antes de activar el webhook." });
+      if (input.isEnabled && !ENV.handoffWebhookSecret) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Falta el secreto NEXO_HANDOFF_WEBHOOK_SECRET en la configuración segura del proyecto. Guarda el destino desactivado hasta añadirlo." });
+      return updateHandoffIntegration(ctx.user.id, { displayName: input.displayName, webhookUrl, isEnabled: input.isEnabled ? 1 : 0 });
+    }),
     list: protectedProcedure.input(z.object({ status: handoffStatusSchema.optional() }).optional()).query(({ ctx, input }) => listProspectHandoffs(ctx.user.id, input?.status)),
     eligibility: protectedProcedure.input(z.object({ prospectId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       const [item, policy, handoff] = await Promise.all([getProspect(ctx.user.id, input.prospectId), getOrCreateHandoffPolicy(ctx.user.id), getProspectHandoff(ctx.user.id, input.prospectId)]);
@@ -575,6 +589,32 @@ export const appRouter = router({
       const slug = item.business.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || input.prospectId;
       return { filename: `nexo-expediente-${slug}.pdf`, mimeType: "application/pdf", contentBase64: Buffer.from(pdf).toString("base64") };
     }),
+    sendToSaas: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), scopeTemplateId: z.number().int().positive().nullable().optional() })).mutation(async ({ ctx, input }) => {
+      const [item, policy, analyses, handoff, integration] = await Promise.all([getProspect(ctx.user.id, input.prospectId), getOrCreateHandoffPolicy(ctx.user.id), listWebsiteAnalyses(ctx.user.id, input.prospectId), getProspectHandoff(ctx.user.id, input.prospectId), getOrCreateHandoffIntegration(ctx.user.id)]);
+      if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
+      assertNoDemoProspects([item]);
+      if (!handoff || !["approved", "package_exported"].includes(handoff.status)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Aprueba primero la oportunidad y prepara su expediente antes de entregarla al SaaS." });
+      if (!integration.isEnabled || !integration.webhookUrl || !ENV.handoffWebhookSecret) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "El webhook SaaS no está listo. Revisa la URL, la activación y el secreto de firma en el panel de integración." });
+      const scopeTemplate = input.scopeTemplateId ? await getWebScopeTemplate(ctx.user.id, input.scopeTemplateId) : null;
+      if (input.scopeTemplateId && !scopeTemplate) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró la plantilla sectorial seleccionada." });
+      const eligibility = handoffEligibilityFromProspect(item, asHandoffPolicy(policy));
+      const dossier = buildAuditDossier({ business: item.business, prospect: item.prospect, eligibility, analyses, scopeTemplate });
+      const deliveryId = `handoff_${nanoid(12)}`;
+      try {
+        const result = await deliverSignedWebhook({ webhookUrl: integration.webhookUrl, secret: ENV.handoffWebhookSecret, event: "audit.dossier.ready", deliveryId, payload: { deliveryId, dossier } });
+        const externalReference = result.reference ?? deliveryId;
+        await Promise.all([
+          updateProspectHandoff(ctx.user.id, input.prospectId, { status: "delivered", deliveredAt: new Date(), externalReference }),
+          updateHandoffIntegration(ctx.user.id, { lastDeliveryAt: new Date(), lastDeliveryStatus: "succeeded", lastDeliveryError: null }),
+          createProspectActivity({ ownerId: ctx.user.id, prospectId: input.prospectId, action: "handoff_delivered", note: `Expediente entregado explícitamente a ${integration.displayName} mediante webhook firmado.` }),
+        ]);
+        return { deliveryId, externalReference, destination: integration.displayName };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "No se pudo completar la entrega al SaaS.";
+        await updateHandoffIntegration(ctx.user.id, { lastDeliveryAt: new Date(), lastDeliveryStatus: "failed", lastDeliveryError: message.slice(0, 1000) });
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message });
+      }
+    }),
     markDelivered: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), externalReference: z.string().trim().min(2).max(512), note: z.string().trim().max(2000).nullable().optional() })).mutation(async ({ ctx, input }) => {
       if (!ENV.handoffConnectorEnabled || !ENV.handoffWebhookUrl) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "El SaaS externo permanece como placeholder inactivo. Exporta el expediente y registra la entrega manual solo después de configurar y habilitar el conector." });
       const item = await getProspect(ctx.user.id, input.prospectId);
@@ -585,7 +625,15 @@ export const appRouter = router({
       await createProspectActivity({ ownerId: ctx.user.id, prospectId: input.prospectId, action: "handoff_delivered", note: "Se registró la entrega al SaaS externo configurado." });
       return handoff;
     }),
-    connectorStatus: protectedProcedure.query(() => ({ enabled: ENV.handoffConnectorEnabled && Boolean(ENV.handoffWebhookUrl), state: ENV.handoffConnectorEnabled && ENV.handoffWebhookUrl ? "activo" : "placeholder_inactivo", instructions: "Configura NEXO_HANDOFF_WEBHOOK_URL y NEXO_ENABLE_HANDOFF_CONNECTOR=true cuando el SaaS externo esté definido." })),
+    connectorStatus: protectedProcedure.query(async ({ ctx }) => {
+      const integration = await getOrCreateHandoffIntegration(ctx.user.id);
+      const enabled = Boolean(integration.isEnabled && integration.webhookUrl && ENV.handoffWebhookSecret);
+      return {
+        enabled,
+        state: enabled ? "activo" : integration.webhookUrl ? "pendiente_de_activacion" : "placeholder_inactivo",
+        instructions: "Define la URL HTTPS pública en este panel y añade NEXO_HANDOFF_WEBHOOK_SECRET como secreto del proyecto antes de activar el envío.",
+      };
+    }),
   }),
   guide: router({
     progress: protectedProcedure.query(({ ctx }) => getOrCreateGuideProgress(ctx.user.id)),
