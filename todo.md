@@ -19,3 +19,21 @@
 - [x] Permitir la asignación y reasignación explícita de responsables en tareas desde backend y frontend.
 - [x] Usar el procedimiento protegido de descarga de archivos desde la interfaz, sin exponer enlaces directos desde el listado.
 - [x] Permitir que la persona propietaria incorpore miembros existentes a un proyecto para habilitar asignaciones colaborativas.
+- [x] Reemplazar la aplicación de gestión de proyectos por un Local Business Opportunity Scanner orientado a la prospección de negocios locales.
+- [x] Diseñar el modelo de datos para campañas de búsqueda, negocios descubiertos, análisis web, oportunidades y seguimiento comercial.
+- [x] Implementar un flujo de búsqueda por ubicación y categoría conectado exclusivamente a fuentes autorizadas mediante variables de entorno.
+- [x] Crear el panel de resultados con filtros, puntaje de oportunidad, señales de presencia web y priorización comercial.
+- [x] Implementar una ficha de negocio con datos disponibles, evaluación de sitio web, notas y estado de prospección.
+- [x] Implementar la gestión de campañas, listas guardadas y estados de seguimiento de prospectos.
+- [x] Sustituir la landing y la navegación para explicar con claridad el producto de prospección local.
+- [x] Documentar en español la activación de fuentes autorizadas, los límites de uso y los placeholders necesarios.
+- [x] Incorporar previsualización obligatoria del plan de búsqueda con proveedor, operaciones estimadas, coste y confirmación explícita antes de ejecutar.
+- [x] Implementar ejecución auditable por etapas, con estados de run, registros de progreso, errores recuperables y parada segura por presupuesto.
+- [x] Implementar normalización, deduplicación y puntuación explicable sin inventar datos empresariales no recibidos desde una fuente autorizada.
+- [x] Preparar exportación CSV y el contrato de datos estable para Google Sheets y las aplicaciones posteriores.
+- [x] Añadir un onboarding que guíe la conexión del proveedor, el perfil de puntuación y la primera prospección.
+- [x] Verificar y completar la lista de oportunidades con filtros, score, señales web y prioridad comercial visibles.
+- [x] Verificar y completar la ficha de negocio con datos, evaluación del sitio, notas y seguimiento editables.
+- [x] Verificar la navegación, landing y documentación final del producto de prospección.
+- [x] Completar la auditoría de ejecución y el control de presupuesto durante el procesamiento.
+- [x] Verificar la exportación CSV y el contrato de salida para Google Sheets y aplicaciones posteriores.

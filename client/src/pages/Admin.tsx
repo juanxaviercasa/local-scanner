@@ -1,9 +1,29 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Button } from "@/components/ui/button";
-import { EmptyWorkspace, PageHeading, StatusPill } from "@/components/WorkspaceUI";
+import DashboardLayout from "@/components/DashboardLayout";
+import { EmptyState, PageHeader, localDate } from "@/components/ScannerUI";
 import { trpc } from "@/lib/trpc";
-import { ShieldAlert, ShieldCheck, UsersRound } from "lucide-react";
+import { UsersRound } from "lucide-react";
 import { toast } from "sonner";
 
-export default function AdminPage() { const { user } = useAuth(); const utils = trpc.useUtils(); const users = trpc.admin.users.useQuery(undefined, { enabled: user?.role === "admin" }); const updateRole = trpc.admin.updateRole.useMutation({ onSuccess: () => { users.refetch(); utils.activity.list.invalidate(); toast.success("Rol actualizado."); }, onError: error => toast.error(error.message) }); if (user?.role !== "admin") return <><PageHeading eyebrow="Acceso restringido" title="Administración" text="Esta área solo está disponible para personas con rol de administrador." /><section className="surface max-w-2xl p-8"><ShieldAlert className="text-destructive" /><h2 className="mt-4 text-xl font-bold">No tienes permiso para ver esta sección.</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">La protección también se aplica en el servidor: las operaciones administrativas no pueden ejecutarse sin el rol adecuado.</p></section></>; return <><PageHeading eyebrow="Gobierno del espacio" title="Administración" text="Gestiona los permisos de acceso de las personas usuarias de Nexo Ops." /><section className="surface overflow-hidden"><div className="flex items-center gap-3 border-b border-border/70 px-6 py-5"><span className="grid h-10 w-10 place-items-center rounded-xl bg-secondary text-primary"><UsersRound size={19} /></span><div><p className="font-bold">Usuarios y roles</p><p className="mt-1 text-xs text-muted-foreground">Los cambios de rol se aplican de inmediato y quedan registrados.</p></div></div>{users.isLoading ? <div className="h-80 animate-pulse" /> : <div className="divide-y divide-border/70">{users.data?.map(person => <div key={person.id} className="flex flex-wrap items-center gap-3 px-6 py-4"><span className="grid h-9 w-9 place-items-center rounded-full bg-muted text-xs font-bold text-muted-foreground">{person.name?.charAt(0).toUpperCase() || "U"}</span><div className="min-w-[190px] flex-1"><p className="text-sm font-bold">{person.name || "Sin nombre"}</p><p className="text-xs text-muted-foreground">{person.email || person.openId}</p></div><StatusPill value={person.role === "admin" ? "active" : "todo"} label={person.role === "admin" ? "Administrador" : "Usuario"} /><select aria-label={`Cambiar rol de ${person.name || "usuario"}`} className="h-9 rounded-lg border bg-background px-2 text-sm" value={person.role} disabled={person.id === user?.id || updateRole.isPending} onChange={event => updateRole.mutate({ userId: person.id, role: event.target.value as "admin" | "user" })}><option value="user">Usuario</option><option value="admin">Administrador</option></select></div>)}</div>}</section></>; }
+export default function Admin() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const users = trpc.admin.users.useQuery(undefined, { enabled: isAdmin });
+  const utils = trpc.useUtils();
+  const update = trpc.admin.updateRole.useMutation({
+    onSuccess: () => { utils.admin.users.invalidate(); toast.success("Rol actualizado."); },
+    onError: error => toast.error(error.message),
+  });
 
+  return <DashboardLayout>
+    <PageHeader eyebrow="Acceso privilegiado" title="Administración" description="Gestiona los roles del espacio. El servidor verifica el rol administrador antes de exponer o modificar estos datos." />
+    {!isAdmin ? <EmptyState title="Acceso restringido" description="Esta ruta está reservada para cuentas administradoras y no expone datos administrativos a usuarios estándar." /> : <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex items-center gap-3 border-b border-slate-100 p-6"><span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-100 text-violet-700"><UsersRound size={18} /></span><div><h2 className="font-bold">Usuarios del scanner</h2><p className="mt-1 text-sm text-slate-500">Las personas aparecen después de su primer acceso autorizado.</p></div></div>
+      <div className="divide-y divide-slate-100">{users.data?.map(member => <div className="flex flex-wrap items-center gap-4 p-5" key={member.id}>
+        <span className="grid h-10 w-10 place-items-center rounded-full bg-slate-900 text-xs font-bold text-white">{(member.name || member.email || "U").slice(0, 2).toUpperCase()}</span>
+        <span className="min-w-48 flex-1"><strong className="block text-sm">{member.name || "Sin nombre"}</strong><small className="text-xs text-slate-500">{member.email || "Sin correo"} · Último acceso {localDate(member.lastSignedIn)}</small></span>
+        <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={member.role} onChange={event => update.mutate({ userId: member.id, role: event.target.value as "admin" | "user" })} disabled={update.isPending || member.id === user?.id}><option value="user">Usuario</option><option value="admin">Administrador</option></select>
+      </div>)}</div>
+    </section>}
+  </DashboardLayout>;
+}

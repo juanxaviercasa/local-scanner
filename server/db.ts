@@ -2,13 +2,24 @@ import { and, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   activities,
+  budgetSettings,
+  businesses,
+  categoryProfiles,
   InsertUser,
+  prospectingRuns,
   projectFiles,
   projects,
   projectMembers,
+  rawSearchResults,
+  runEvents,
+  runProspects,
+  scoringProfiles,
+  searchProfiles,
   tasks,
+  usageRecords,
   users,
 } from "../drizzle/schema";
+import { DEFAULT_SCORING_THRESHOLDS, DEFAULT_SCORING_WEIGHTS } from "./scoring";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -328,5 +339,246 @@ export async function getDashboardMetrics(userId: number) {
     pendingTasks: rows.filter(task => task.status !== "done").length,
     completedTasks: rows.filter(task => task.status === "done").length,
     overdueTasks: rows.filter(task => task.status !== "done" && task.dueDate && task.dueDate < now).length,
+  };
+}
+
+export async function getOrCreateBudgetSettings(ownerId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const existing = await db.select().from(budgetSettings).where(eq(budgetSettings.ownerId, ownerId)).limit(1);
+  if (existing[0]) return existing[0];
+  await db.insert(budgetSettings).values({ ownerId });
+  return (await db.select().from(budgetSettings).where(eq(budgetSettings.ownerId, ownerId)).limit(1))[0]!;
+}
+
+export async function updateBudgetSettings(ownerId: number, data: Partial<{
+  dailyRequestBudget: number;
+  monthlyRequestBudget: number;
+  maxCostPerRunCents: number;
+  maxBusinessesPerRun: number;
+  maxAiCallsPerRun: number;
+}>) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  await getOrCreateBudgetSettings(ownerId);
+  await db.update(budgetSettings).set(data).where(eq(budgetSettings.ownerId, ownerId));
+  return getOrCreateBudgetSettings(ownerId);
+}
+
+export async function getOrCreateDefaultScoringProfile(ownerId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const existing = await db.select().from(scoringProfiles).where(and(eq(scoringProfiles.ownerId, ownerId), eq(scoringProfiles.isDefault, 1))).limit(1);
+  if (existing[0]) return existing[0];
+  const result = await db.insert(scoringProfiles).values({
+    ownerId,
+    name: "Puntuación base",
+    isDefault: 1,
+    weights: DEFAULT_SCORING_WEIGHTS,
+    thresholds: DEFAULT_SCORING_THRESHOLDS,
+  });
+  return (await db.select().from(scoringProfiles).where(eq(scoringProfiles.id, Number(result[0].insertId))).limit(1))[0]!;
+}
+
+export async function listScoringProfiles(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(scoringProfiles).where(eq(scoringProfiles.ownerId, ownerId)).orderBy(desc(scoringProfiles.updatedAt));
+}
+
+export async function updateScoringProfile(ownerId: number, profileId: number, data: Partial<{ name: string; weights: Record<string, number>; thresholds: Record<string, number> }>) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  await db.update(scoringProfiles).set(data).where(and(eq(scoringProfiles.id, profileId), eq(scoringProfiles.ownerId, ownerId)));
+  return (await db.select().from(scoringProfiles).where(and(eq(scoringProfiles.id, profileId), eq(scoringProfiles.ownerId, ownerId))).limit(1))[0];
+}
+
+export async function listSearchProfiles(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(searchProfiles).where(eq(searchProfiles.ownerId, ownerId)).orderBy(desc(searchProfiles.updatedAt));
+}
+
+export async function createSearchProfile(ownerId: number, data: {
+  name: string;
+  country: string;
+  city: string;
+  district?: string | null;
+  referenceAddress?: string | null;
+  primaryCategory: string;
+  keywords?: string[];
+  excludedKeywords?: string[];
+  radiusMeters: number;
+  maxResults: number;
+  minRating?: number | null;
+  minReviewCount: number;
+  minOpportunityScore: number;
+  websiteMode: "no_website" | "with_website" | "both";
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const result = await db.insert(searchProfiles).values({
+    ...data,
+    ownerId,
+    minRating: data.minRating === null || data.minRating === undefined ? null : String(data.minRating),
+  });
+  return (await db.select().from(searchProfiles).where(eq(searchProfiles.id, Number(result[0].insertId))).limit(1))[0]!;
+}
+
+export async function getUsageSummary(ownerId: number) {
+  const db = await getDb();
+  if (!db) return { dailyRequests: 0, monthlyRequests: 0, monthlyCostCents: 0 };
+  const rows = await db.select().from(usageRecords).where(eq(usageRecords.ownerId, ownerId));
+  const now = new Date();
+  const startDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  return rows.reduce(
+    (summary, row) => ({
+      dailyRequests: summary.dailyRequests + (row.createdAt >= startDay ? row.requestCount : 0),
+      monthlyRequests: summary.monthlyRequests + (row.createdAt >= startMonth ? row.requestCount : 0),
+      monthlyCostCents: summary.monthlyCostCents + (row.createdAt >= startMonth ? row.estimatedCostCents : 0),
+    }),
+    { dailyRequests: 0, monthlyRequests: 0, monthlyCostCents: 0 }
+  );
+}
+
+export async function createProspectingRun(data: {
+  ownerId: number; publicId: string; query: string; country: string; city: string; district?: string | null; referenceAddress?: string | null;
+  radiusMeters: number; primaryCategory: string; keywords?: string[] | null; excludedKeywords?: string[] | null; websiteMode?: "no_website" | "with_website" | "both";
+  maxResults: number; minRating?: number | null; minReviewCount: number; minOpportunityScore: number; scoringSnapshot: Record<string, number>;
+  estimatedOperations: number; estimatedCostCents: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const result = await db.insert(prospectingRuns).values({
+    ...data,
+    minRating: data.minRating === null || data.minRating === undefined ? null : String(data.minRating),
+  });
+  return (await db.select().from(prospectingRuns).where(eq(prospectingRuns.id, Number(result[0].insertId))).limit(1))[0]!;
+}
+
+export async function updateProspectingRun(runId: number, ownerId: number, data: Partial<{
+  status: "queued" | "running" | "paused" | "completed" | "partial" | "failed" | "cancelled";
+  foundCount: number; uniqueCount: number; qualifiedCount: number; rejectedCount: number; errorCount: number; startedAt: Date | null; finishedAt: Date | null;
+}>) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  await db.update(prospectingRuns).set(data).where(and(eq(prospectingRuns.id, runId), eq(prospectingRuns.ownerId, ownerId)));
+  return getProspectingRun(runId, ownerId);
+}
+
+export async function getProspectingRun(runId: number, ownerId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return (await db.select().from(prospectingRuns).where(and(eq(prospectingRuns.id, runId), eq(prospectingRuns.ownerId, ownerId))).limit(1))[0];
+}
+
+export async function listProspectingRuns(ownerId: number, limit = 30) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(prospectingRuns).where(eq(prospectingRuns.ownerId, ownerId)).orderBy(desc(prospectingRuns.createdAt)).limit(limit);
+}
+
+export async function createRunEvent(data: { runId: number; stage: "plan" | "search" | "details" | "normalize" | "deduplicate" | "score" | "export" | "budget"; level?: "info" | "warning" | "error"; message: string; errorCode?: string | null; recoverable?: number }) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(runEvents).values(data);
+}
+
+export async function listRunEvents(runId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(desc(runEvents.createdAt));
+}
+
+export async function createUsageRecord(data: { ownerId: number; runId?: number | null; provider: string; operation: string; requestCount: number; estimatedCostCents?: number }) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(usageRecords).values(data);
+}
+
+export async function upsertBusinessFromProvider(data: {
+  ownerId: number; source: string; externalId: string; deduplicationKey: string; name: string; category?: string | null; categories?: string[] | null;
+  address?: string | null; city?: string | null; region?: string | null; country?: string | null; latitude?: number | null; longitude?: number | null;
+  phone?: string | null; website?: string | null; domain?: string | null; googleMapsUrl?: string | null; rating?: number | null; reviewCount?: number | null;
+  businessStatus?: string | null; websiteStatus: "no_website" | "website_found" | "website_unreachable" | "website_unknown"; dataQualityScore: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const found = await db.select().from(businesses).where(and(eq(businesses.ownerId, data.ownerId), eq(businesses.source, data.source), eq(businesses.externalId, data.externalId))).limit(1);
+  const values = {
+    ...data,
+    latitude: data.latitude === null || data.latitude === undefined ? null : String(data.latitude),
+    longitude: data.longitude === null || data.longitude === undefined ? null : String(data.longitude),
+    rating: data.rating === null || data.rating === undefined ? null : String(data.rating),
+    sourceTimestamp: new Date(),
+  };
+  if (found[0]) {
+    await db.update(businesses).set(values).where(eq(businesses.id, found[0].id));
+    return { business: (await db.select().from(businesses).where(eq(businesses.id, found[0].id)).limit(1))[0]!, isKnown: true };
+  }
+  const inserted = await db.insert(businesses).values(values);
+  return { business: (await db.select().from(businesses).where(eq(businesses.id, Number(inserted[0].insertId))).limit(1))[0]!, isKnown: false };
+}
+
+export async function createRawSearchResult(data: { runId: number; provider: string; providerRecordId: string; query: string; payload: Record<string, unknown> }) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(rawSearchResults).values(data);
+}
+
+export async function createRunProspect(data: {
+  runId: number; businessId: number; duplicateConfidence?: "exact" | "high" | "medium" | "low"; status?: "new" | "qualified" | "rejected";
+  opportunityScore: number; businessAttractivenessScore: number; digitalOpportunityScore: number; websiteOpportunityScore: number; leadPotentialScore: number; commercialPotentialScore: number; urgencyScore: number;
+  priority: "p0" | "p1" | "p2" | "p3" | "ignore"; opportunityTypes: string[]; scoreReasons: Array<{ label: string; points: number }>; analysisSummary: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const result = await db.insert(runProspects).values(data);
+  return (await db.select().from(runProspects).where(eq(runProspects.id, Number(result[0].insertId))).limit(1))[0]!;
+}
+
+export async function listProspects(ownerId: number, filters?: { runId?: number; priority?: "p0" | "p1" | "p2" | "p3" | "ignore"; websiteStatus?: "no_website" | "website_found" | "website_unreachable" | "website_unknown"; minimumScore?: number; query?: string; limit?: number }) {
+  const db = await getDb();
+  if (!db) return [];
+  const predicates = [eq(businesses.ownerId, ownerId)];
+  if (filters?.runId) predicates.push(eq(runProspects.runId, filters.runId));
+  if (filters?.priority) predicates.push(eq(runProspects.priority, filters.priority));
+  if (filters?.websiteStatus) predicates.push(eq(businesses.websiteStatus, filters.websiteStatus));
+  if (filters?.minimumScore !== undefined) predicates.push(sql`${runProspects.opportunityScore} >= ${filters.minimumScore}`);
+  if (filters?.query) predicates.push(or(like(businesses.name, `%${filters.query.trim()}%`), like(businesses.city, `%${filters.query.trim()}%`))!);
+  return db.select({ prospect: runProspects, business: businesses, run: prospectingRuns }).from(runProspects).innerJoin(businesses, eq(runProspects.businessId, businesses.id)).innerJoin(prospectingRuns, eq(runProspects.runId, prospectingRuns.id)).where(and(...predicates)).orderBy(desc(runProspects.opportunityScore)).limit(filters?.limit ?? 200);
+}
+
+export async function getProspect(ownerId: number, prospectId: number) {
+  const rows = await listProspects(ownerId, { limit: 500 });
+  return rows.find(row => row.prospect.id === prospectId);
+}
+
+export async function updateRunProspect(ownerId: number, prospectId: number, data: Partial<{ status: "new" | "qualified" | "rejected" | "exported" | "analysis_pending" | "analyzed" | "demo_pending" | "contact_pending" | "contacted" | "converted" | "lost"; notes: string | null }>) {
+  const prospect = await getProspect(ownerId, prospectId);
+  if (!prospect) return undefined;
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.update(runProspects).set(data).where(eq(runProspects.id, prospectId));
+  return getProspect(ownerId, prospectId);
+}
+
+export async function getScannerDashboard(ownerId: number) {
+  const db = await getDb();
+  if (!db) return { totalRuns: 0, found: 0, unique: 0, withWebsite: 0, withoutWebsite: 0, p0: 0, p1: 0, p2: 0, averageScore: 0 };
+  const runs = await db.select().from(prospectingRuns).where(eq(prospectingRuns.ownerId, ownerId));
+  const prospects = await listProspects(ownerId, { limit: 5000 });
+  const scores = prospects.map(item => item.prospect.opportunityScore);
+  return {
+    totalRuns: runs.length,
+    found: runs.reduce((total, run) => total + run.foundCount, 0),
+    unique: runs.reduce((total, run) => total + run.uniqueCount, 0),
+    withWebsite: prospects.filter(item => item.business.websiteStatus === "website_found").length,
+    withoutWebsite: prospects.filter(item => item.business.websiteStatus === "no_website").length,
+    p0: prospects.filter(item => item.prospect.priority === "p0").length,
+    p1: prospects.filter(item => item.prospect.priority === "p1").length,
+    p2: prospects.filter(item => item.prospect.priority === "p2").length,
+    averageScore: scores.length ? Math.round(scores.reduce((total, score) => total + score, 0) / scores.length) : 0,
   };
 }
