@@ -47,6 +47,7 @@ export function buildAuditDossier(input: {
   prospect: { id: number; opportunityScore: number; priority: string; opportunityTypes?: string[] | null; scoreReasons: Array<{ label: string; points: number }>; analysisSummary?: string | null; nextActionLabel?: string | null; nextActionAt?: Date | null; status: string };
   eligibility: ReturnType<typeof evaluateHandoffEligibility>;
   analyses: Array<{ status: string; strategy: string; performanceScore?: number | null; accessibilityScore?: number | null; bestPracticesScore?: number | null; seoScore?: number | null; summary?: string | null; analyzedAt: Date }>;
+  scopeTemplate?: { id: number; name: string; sector: string; overview: string; deliverables: string[]; successMetrics: string[] } | null;
 }) {
   const recommendation = input.business.websiteStatus === "no_website"
     ? {
@@ -89,6 +90,15 @@ export function buildAuditDossier(input: {
     auditBrief: {
       executiveSummary: `Oportunidad ${input.prospect.priority.toUpperCase()} con Opportunity Score ${input.prospect.opportunityScore}/100. El expediente organiza únicamente señales verificables para que la siguiente fase decida el alcance de una creación o mejora web.`,
       recommendedEngagement: recommendation,
+      customizedWebScope: input.scopeTemplate ? {
+        templateId: input.scopeTemplate.id,
+        name: input.scopeTemplate.name,
+        sector: input.scopeTemplate.sector,
+        overview: input.scopeTemplate.overview,
+        deliverables: input.scopeTemplate.deliverables,
+        successMetrics: input.scopeTemplate.successMetrics,
+        note: "Este alcance se adapta en la auditoría posterior según las señales verificables del negocio.",
+      } : null,
       opportunitySignals,
       auditAgenda: [
         "Confirmar objetivos comerciales, oferta principal y zona de servicio con el negocio.",

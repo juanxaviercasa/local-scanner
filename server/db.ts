@@ -22,8 +22,10 @@ import {
   searchProfiles,
   tasks,
   usageRecords,
+  userGuideProgress,
   users,
   websiteAnalyses,
+  webScopeTemplates,
 } from "../drizzle/schema";
 import { DEFAULT_SCORING_THRESHOLDS, DEFAULT_SCORING_WEIGHTS } from "./scoring";
 import { ENV } from "./_core/env";
@@ -790,6 +792,67 @@ export async function deleteQualificationTemplate(ownerId: number, templateId: n
   const db = await getDb();
   if (!db) return;
   await db.delete(qualificationTemplates).where(and(eq(qualificationTemplates.id, templateId), eq(qualificationTemplates.ownerId, ownerId)));
+}
+
+const DEFAULT_WEB_SCOPE_TEMPLATES = [
+  { name: "Servicios profesionales", sector: "Servicios profesionales", overview: "Sitio orientado a credibilidad, explicación clara de servicios y captación de consultas cualificadas.", deliverables: ["Página de servicios", "Formulario de contacto", "Sección de confianza y proceso", "Analítica básica"], successMetrics: ["Consultas cualificadas", "Solicitudes de presupuesto", "Conversión de formularios"] },
+  { name: "Restaurantes y cafeterías", sector: "Gastronomía", overview: "Experiencia móvil para mostrar propuesta gastronómica, ubicación, horarios y canales de reserva o pedido.", deliverables: ["Menú editable", "Horario y mapa", "Llamadas a reserva o pedido", "Galería de marca"], successMetrics: ["Clics en reserva", "Clics en llamada", "Visitas a menú"] },
+  { name: "Salud y bienestar", sector: "Salud y bienestar", overview: "Presencia informativa y accesible para presentar servicios, especialistas y solicitud de cita.", deliverables: ["Servicios y especialidades", "Solicitud de cita", "Preguntas frecuentes", "Avisos de privacidad"], successMetrics: ["Solicitudes de cita", "Llamadas desde móvil", "Lectura de servicios"] },
+  { name: "Comercio local", sector: "Comercio", overview: "Vitrina digital enfocada en catálogo, ubicación y rutas claras de compra o contacto.", deliverables: ["Catálogo destacado", "Ubicación y horarios", "Canal de consulta", "Promociones editables"], successMetrics: ["Consultas sobre productos", "Clics a contacto", "Visitas a catálogo"] },
+];
+
+export async function getOrCreateGuideProgress(ownerId: number) {
+  const db = await getDb();
+  if (!db) return { ownerId, completedSteps: [] as number[] };
+  const current = await db.select().from(userGuideProgress).where(eq(userGuideProgress.ownerId, ownerId)).limit(1);
+  if (current[0]) return current[0];
+  await db.insert(userGuideProgress).values({ ownerId, completedSteps: [] });
+  return (await db.select().from(userGuideProgress).where(eq(userGuideProgress.ownerId, ownerId)).limit(1))[0]!;
+}
+
+export async function updateGuideProgress(ownerId: number, completedSteps: number[]) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const safeSteps = Array.from(new Set(completedSteps.filter(step => Number.isInteger(step) && step >= 0 && step < 5))).sort((a, b) => a - b);
+  const current = await db.select({ id: userGuideProgress.id }).from(userGuideProgress).where(eq(userGuideProgress.ownerId, ownerId)).limit(1);
+  if (current[0]) await db.update(userGuideProgress).set({ completedSteps: safeSteps }).where(eq(userGuideProgress.ownerId, ownerId));
+  else await db.insert(userGuideProgress).values({ ownerId, completedSteps: safeSteps });
+  return getOrCreateGuideProgress(ownerId);
+}
+
+export async function getOrCreateWebScopeTemplates(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const current = await db.select().from(webScopeTemplates).where(eq(webScopeTemplates.ownerId, ownerId)).orderBy(desc(webScopeTemplates.updatedAt));
+  if (current.length) return current;
+  await db.insert(webScopeTemplates).values(DEFAULT_WEB_SCOPE_TEMPLATES.map((template, index) => ({ ...template, ownerId, isDefault: index === 0 ? 1 : 0 })));
+  return db.select().from(webScopeTemplates).where(eq(webScopeTemplates.ownerId, ownerId)).orderBy(desc(webScopeTemplates.updatedAt));
+}
+
+export async function getWebScopeTemplate(ownerId: number, templateId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return (await db.select().from(webScopeTemplates).where(and(eq(webScopeTemplates.ownerId, ownerId), eq(webScopeTemplates.id, templateId))).limit(1))[0];
+}
+
+export async function createWebScopeTemplate(ownerId: number, data: { name: string; sector: string; overview: string; deliverables: string[]; successMetrics: string[]; isDefault?: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const result = await db.insert(webScopeTemplates).values({ ownerId, ...data });
+  return (await db.select().from(webScopeTemplates).where(eq(webScopeTemplates.id, Number(result[0].insertId))).limit(1))[0]!;
+}
+
+export async function updateWebScopeTemplate(ownerId: number, templateId: number, data: Partial<{ name: string; sector: string; overview: string; deliverables: string[]; successMetrics: string[]; isDefault: number }>) {
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.update(webScopeTemplates).set(data).where(and(eq(webScopeTemplates.id, templateId), eq(webScopeTemplates.ownerId, ownerId)));
+  return getWebScopeTemplate(ownerId, templateId);
+}
+
+export async function deleteWebScopeTemplate(ownerId: number, templateId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(webScopeTemplates).where(and(eq(webScopeTemplates.id, templateId), eq(webScopeTemplates.ownerId, ownerId)));
 }
 
 export async function getScannerDashboard(ownerId: number) {

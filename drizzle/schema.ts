@@ -290,6 +290,28 @@ export const prospectHandoffs = mysqlTable("prospectHandoffs", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => [index("prospect_handoffs_owner_status_idx").on(table.ownerId, table.status), index("prospect_handoffs_prospect_idx").on(table.prospectId)]);
 
+/** Avance del recorrido guiado, sincronizado por cuenta sin depender del navegador. */
+export const userGuideProgress = mysqlTable("userGuideProgress", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull().unique(),
+  completedSteps: json("completedSteps").$type<number[]>().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+/** Plantillas editables de alcance web para adaptar cada expediente al sector del negocio. */
+export const webScopeTemplates = mysqlTable("webScopeTemplates", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  name: varchar("name", { length: 140 }).notNull(),
+  sector: varchar("sector", { length: 100 }).notNull(),
+  overview: text("overview").notNull(),
+  deliverables: json("deliverables").$type<string[]>().notNull(),
+  successMetrics: json("successMetrics").$type<string[]>().notNull(),
+  isDefault: int("isDefault").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [index("web_scope_templates_owner_sector_idx").on(table.ownerId, table.sector)]);
+
 /** Historial de análisis técnico sobre un sitio público indicado por el propio negocio. */
 export const websiteAnalyses = mysqlTable("websiteAnalyses", {
   id: int("id").autoincrement().primaryKey(),

@@ -12,6 +12,8 @@ vi.mock("@/components/ScannerUI", () => ({
   ),
 }));
 
+vi.mock("@/components/ScannerTour", () => ({ default: () => <section aria-label="Recorrido guiado simulado" /> }));
+
 import Guide from "./Guide";
 
 afterEach(() => cleanup());
@@ -24,7 +26,6 @@ describe("Guide", () => {
     expect(screen.getByRole("heading", { name: "Guía de operación" })).toBeTruthy();
     expect(screen.getByText("Límites que protegen tu operación")).toBeTruthy();
     expect(screen.getByText(/El expediente 2\.0 reúne señales verificables/i)).toBeTruthy();
-
     const transitionLinks = screen.getAllByRole("link", { name: /transición|expedientes/i });
     expect(transitionLinks.some(link => link.getAttribute("href") === "/app/transiciones")).toBe(true);
   });

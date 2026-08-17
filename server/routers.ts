@@ -16,17 +16,22 @@ import {
   createSearchProfile,
   createUsageRecord,
   createWebsiteAnalysis,
+  createWebScopeTemplate,
   deleteQualificationTemplate,
+  deleteWebScopeTemplate,
   getOrCreateBudgetSettings,
   getOrCreateDefaultScoringProfile,
+  getOrCreateGuideProgress,
   getOrCreateHandoffPolicy,
   getOrCreateQualificationTemplates,
+  getOrCreateWebScopeTemplates,
   getProspect,
   getProspectHandoff,
   getProspectReminders,
   getProspectingRun,
   getScannerDashboard,
   getUsageSummary,
+  getWebScopeTemplate,
   listProspectExports,
   listProspectActivities,
   listProspectHandoffs,
@@ -42,11 +47,13 @@ import {
   updateBudgetSettings,
   updateHandoffPolicy,
   updateBusinessWebsiteAnalysis,
+  updateGuideProgress,
   updateQualificationTemplate,
   updateRunProspect,
   updateScoringProfile,
   updateUserProfile,
   updateUserRole,
+  updateWebScopeTemplate,
   updateProspectingRun,
   updateProspectHandoff,
   upsertProspectHandoff,
@@ -61,6 +68,7 @@ import { buildProspectFollowup } from "./prospectFollowup";
 import { analyzePublicWebsite, isPageSpeedConfigured } from "./websiteAnalyzer";
 import { createValidationDemo } from "./demoValidation";
 import { buildAuditDossier, evaluateHandoffEligibility } from "./handoff";
+import { buildAuditDossierPdf } from "./auditPdf";
 
 const websiteStatusSchema = z.enum(["no_website", "website_found", "website_unreachable", "website_unknown"]);
 const prioritySchema = z.enum(["p0", "p1", "p2", "p3", "ignore"]);
@@ -69,6 +77,7 @@ const handoffStatusSchema = z.enum(["ready_for_review", "approved", "package_exp
 const dueStateSchema = z.enum(["overdue", "today", "upcoming", "none"]);
 const runStatusSchema = z.enum(["queued", "running", "paused", "completed", "partial", "failed", "cancelled"]);
 export const authorizedSourceSchema = z.enum(["csv_import", "manual_entry", "google_maps"]);
+const scopeTemplateInput = z.object({ name: z.string().trim().min(2).max(140), sector: z.string().trim().min(2).max(100), overview: z.string().trim().min(10).max(5000), deliverables: z.array(z.string().trim().min(2).max(300)).min(1).max(20), successMetrics: z.array(z.string().trim().min(2).max(300)).min(1).max(20), isDefault: z.number().int().min(0).max(1).optional() });
 const calibrationRowSchema = z.object({
   outcome: z.enum(["won", "lost"]),
   noWebsite: z.boolean().nullable(), weakWebsite: z.boolean().nullable(), reviewCount: z.number().int().min(0).max(1000000).nullable(), rating: z.number().min(0).max(5).nullable(),
@@ -534,18 +543,37 @@ export const appRouter = router({
       await createProspectActivity({ ownerId: ctx.user.id, prospectId: input.prospectId, action: "handoff_approved", note: "La oportunidad fue aprobada para preparar el expediente de auditoría." });
       return handoff;
     }),
-    dossier: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), markExported: z.boolean().default(false) })).mutation(async ({ ctx, input }) => {
+    dossier: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), scopeTemplateId: z.number().int().positive().nullable().optional(), markExported: z.boolean().default(false) })).mutation(async ({ ctx, input }) => {
       const [item, policy, analyses, handoff] = await Promise.all([getProspect(ctx.user.id, input.prospectId), getOrCreateHandoffPolicy(ctx.user.id), listWebsiteAnalyses(ctx.user.id, input.prospectId), getProspectHandoff(ctx.user.id, input.prospectId)]);
       if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
       assertNoDemoProspects([item]);
       if (!handoff || !["approved", "package_exported", "delivered"].includes(handoff.status)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Aprueba primero la oportunidad en la cola de auditoría." });
       const eligibility = handoffEligibilityFromProspect(item, asHandoffPolicy(policy));
-      const dossier = buildAuditDossier({ business: item.business, prospect: item.prospect, eligibility, analyses });
+      const scopeTemplate = input.scopeTemplateId ? await getWebScopeTemplate(ctx.user.id, input.scopeTemplateId) : null;
+      if (input.scopeTemplateId && !scopeTemplate) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró la plantilla sectorial seleccionada." });
+      const dossier = buildAuditDossier({ business: item.business, prospect: item.prospect, eligibility, analyses, scopeTemplate });
       if (input.markExported && handoff.status !== "delivered") {
         await updateProspectHandoff(ctx.user.id, input.prospectId, { status: "package_exported", packageExportedAt: new Date(), eligibilitySnapshot: eligibility.criteria });
         await createProspectActivity({ ownerId: ctx.user.id, prospectId: input.prospectId, action: "audit_package_exported", note: "Expediente de auditoría exportado para revisión externa." });
       }
       return { filename: `nexo-expediente-${item.business.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || input.prospectId}.json`, dossier };
+    }),
+    dossierPdf: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), scopeTemplateId: z.number().int().positive().nullable().optional(), markExported: z.boolean().default(false) })).mutation(async ({ ctx, input }) => {
+      const [item, policy, analyses, handoff] = await Promise.all([getProspect(ctx.user.id, input.prospectId), getOrCreateHandoffPolicy(ctx.user.id), listWebsiteAnalyses(ctx.user.id, input.prospectId), getProspectHandoff(ctx.user.id, input.prospectId)]);
+      if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
+      assertNoDemoProspects([item]);
+      if (!handoff || !["approved", "package_exported", "delivered"].includes(handoff.status)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Aprueba primero la oportunidad en la cola de auditoría." });
+      const scopeTemplate = input.scopeTemplateId ? await getWebScopeTemplate(ctx.user.id, input.scopeTemplateId) : null;
+      if (input.scopeTemplateId && !scopeTemplate) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró la plantilla sectorial seleccionada." });
+      const eligibility = handoffEligibilityFromProspect(item, asHandoffPolicy(policy));
+      const dossier = buildAuditDossier({ business: item.business, prospect: item.prospect, eligibility, analyses, scopeTemplate });
+      const pdf = await buildAuditDossierPdf(dossier);
+      if (input.markExported && handoff.status !== "delivered") {
+        await updateProspectHandoff(ctx.user.id, input.prospectId, { status: "package_exported", packageExportedAt: new Date(), eligibilitySnapshot: eligibility.criteria });
+        await createProspectActivity({ ownerId: ctx.user.id, prospectId: input.prospectId, action: "audit_package_exported", note: "Expediente de auditoría PDF exportado para revisión externa." });
+      }
+      const slug = item.business.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || input.prospectId;
+      return { filename: `nexo-expediente-${slug}.pdf`, mimeType: "application/pdf", contentBase64: Buffer.from(pdf).toString("base64") };
     }),
     markDelivered: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), externalReference: z.string().trim().min(2).max(512), note: z.string().trim().max(2000).nullable().optional() })).mutation(async ({ ctx, input }) => {
       if (!ENV.handoffConnectorEnabled || !ENV.handoffWebhookUrl) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "El SaaS externo permanece como placeholder inactivo. Exporta el expediente y registra la entrega manual solo después de configurar y habilitar el conector." });
@@ -558,6 +586,21 @@ export const appRouter = router({
       return handoff;
     }),
     connectorStatus: protectedProcedure.query(() => ({ enabled: ENV.handoffConnectorEnabled && Boolean(ENV.handoffWebhookUrl), state: ENV.handoffConnectorEnabled && ENV.handoffWebhookUrl ? "activo" : "placeholder_inactivo", instructions: "Configura NEXO_HANDOFF_WEBHOOK_URL y NEXO_ENABLE_HANDOFF_CONNECTOR=true cuando el SaaS externo esté definido." })),
+  }),
+  guide: router({
+    progress: protectedProcedure.query(({ ctx }) => getOrCreateGuideProgress(ctx.user.id)),
+    updateProgress: protectedProcedure.input(z.object({ completedSteps: z.array(z.number().int().min(0).max(4)).max(5) })).mutation(({ ctx, input }) => updateGuideProgress(ctx.user.id, input.completedSteps)),
+  }),
+  scopeTemplates: router({
+    list: protectedProcedure.query(({ ctx }) => getOrCreateWebScopeTemplates(ctx.user.id)),
+    create: protectedProcedure.input(scopeTemplateInput).mutation(({ ctx, input }) => createWebScopeTemplate(ctx.user.id, input)),
+    update: protectedProcedure.input(scopeTemplateInput.partial().extend({ templateId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const { templateId, ...data } = input;
+      const updated = await updateWebScopeTemplate(ctx.user.id, templateId, data);
+      if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró la plantilla sectorial." });
+      return updated;
+    }),
+    remove: protectedProcedure.input(z.object({ templateId: z.number().int().positive() })).mutation(({ ctx, input }) => deleteWebScopeTemplate(ctx.user.id, input.templateId)),
   }),
   templates: router({
     list: protectedProcedure.query(({ ctx }) => getOrCreateQualificationTemplates(ctx.user.id)),

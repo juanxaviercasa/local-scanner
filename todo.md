@@ -111,3 +111,13 @@
 - [x] Añadir una prueba de navegación que verifique el acceso a la guía desde la barra privada del panel.
 - [x] Añadir una prueba de transición que confirme el enlace visible a la guía y la tarjeta del expediente de auditoría 2.0.
 - [x] Reejecutar la validación completa después de cubrir la navegación y transición de la orientación integrada.
+- [x] Persistir el avance del recorrido guiado por usuario y sincronizarlo entre sesiones y dispositivos.
+- [x] Crear plantillas de alcance web editables por sector para incorporar al expediente de auditoría.
+- [x] Añadir una exportación PDF profesional del expediente de auditoría, con controles de acceso y sin entrega externa automática.
+- [x] Validar contratos, contenido PDF, plantillas sectoriales y recorrido persistente con pruebas automatizadas y revisión visual.
+- [x] Añadir edición y eliminación visibles para plantillas sectoriales, conectadas a los contratos protegidos existentes.
+- [x] Cubrir con pruebas automatizadas el PDF, los contratos de plantillas y la persistencia de progreso por usuario.
+- [x] Actualizar la guía operativa para describir el progreso persistente por cuenta en lugar de almacenamiento local.
+- [x] Corregir la anchura del selector sectorial en escritorio para evitar que el valor activo quede truncado.
+- [x] Reforzar y validar la visibilidad completa del selector sectorial para etiquetas de plantilla largas en escritorio.
+- [x] Mostrar y comprobar el nombre completo de la plantilla activa fuera del selector nativo para evitar cualquier truncamiento visual.
