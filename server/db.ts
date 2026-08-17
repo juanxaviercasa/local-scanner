@@ -10,14 +10,17 @@ import {
   projectFiles,
   projects,
   projectMembers,
+  prospectExports,
   rawSearchResults,
   runEvents,
   runProspects,
+  qualificationTemplates,
   scoringProfiles,
   searchProfiles,
   tasks,
   usageRecords,
   users,
+  websiteAnalyses,
 } from "../drizzle/schema";
 import { DEFAULT_SCORING_THRESHOLDS, DEFAULT_SCORING_WEIGHTS } from "./scoring";
 import { ENV } from "./_core/env";
@@ -444,6 +447,7 @@ export async function getUsageSummary(ownerId: number) {
 
 export async function createProspectingRun(data: {
   ownerId: number; publicId: string; query: string; country: string; city: string; district?: string | null; referenceAddress?: string | null;
+  provider?: "google_maps" | "csv_import" | "manual_entry";
   radiusMeters: number; primaryCategory: string; keywords?: string[] | null; excludedKeywords?: string[] | null; websiteMode?: "no_website" | "with_website" | "both";
   maxResults: number; minRating?: number | null; minReviewCount: number; minOpportunityScore: number; scoringSnapshot: Record<string, number>;
   estimatedOperations: number; estimatedCostCents: number;
@@ -562,6 +566,132 @@ export async function updateRunProspect(ownerId: number, prospectId: number, dat
   if (!db) return undefined;
   await db.update(runProspects).set(data).where(eq(runProspects.id, prospectId));
   return getProspect(ownerId, prospectId);
+}
+
+export async function updateAnalyzedProspect(ownerId: number, prospectId: number, data: {
+  status: "analyzed";
+  opportunityScore: number;
+  businessAttractivenessScore: number;
+  digitalOpportunityScore: number;
+  websiteOpportunityScore: number;
+  leadPotentialScore: number;
+  commercialPotentialScore: number;
+  urgencyScore: number;
+  priority: "p0" | "p1" | "p2" | "p3" | "ignore";
+  opportunityTypes: string[];
+  scoreReasons: Array<{ label: string; points: number }>;
+  analysisSummary: string;
+  analysisConfidence: number;
+}) {
+  const prospect = await getProspect(ownerId, prospectId);
+  if (!prospect) return undefined;
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.update(runProspects).set({ ...data, analysisConfidence: String(data.analysisConfidence), lastCheckedAt: new Date() }).where(eq(runProspects.id, prospectId));
+  return getProspect(ownerId, prospectId);
+}
+
+export async function updateBusinessWebsiteAnalysis(ownerId: number, businessId: number, data: {
+  websiteQuality: "excellent" | "good" | "average" | "weak" | "very_weak" | "broken";
+  websiteSignals: Record<string, boolean | number | string | null>;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.update(businesses).set(data).where(and(eq(businesses.id, businessId), eq(businesses.ownerId, ownerId)));
+  return (await db.select().from(businesses).where(and(eq(businesses.id, businessId), eq(businesses.ownerId, ownerId))).limit(1))[0];
+}
+
+export async function createWebsiteAnalysis(data: {
+  ownerId: number;
+  prospectId: number;
+  url: string;
+  strategy: "mobile" | "desktop";
+  status: "completed" | "failed" | "skipped";
+  performanceScore?: number | null;
+  accessibilityScore?: number | null;
+  bestPracticesScore?: number | null;
+  seoScore?: number | null;
+  signals?: Record<string, boolean | number | string | null> | null;
+  summary?: string | null;
+  errorMessage?: string | null;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const result = await db.insert(websiteAnalyses).values(data);
+  return (await db.select().from(websiteAnalyses).where(eq(websiteAnalyses.id, Number(result[0].insertId))).limit(1))[0]!;
+}
+
+export async function listWebsiteAnalyses(ownerId: number, prospectId: number) {
+  const prospect = await getProspect(ownerId, prospectId);
+  if (!prospect) return [];
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(websiteAnalyses).where(and(eq(websiteAnalyses.ownerId, ownerId), eq(websiteAnalyses.prospectId, prospectId))).orderBy(desc(websiteAnalyses.analyzedAt));
+}
+
+export async function recordProspectExport(data: {
+  ownerId: number;
+  prospectId: number;
+  destination: "google_sheets";
+  destinationLabel: string;
+  externalReference?: string | null;
+  status: "succeeded" | "failed";
+  errorMessage?: string | null;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const result = await db.insert(prospectExports).values(data);
+  return (await db.select().from(prospectExports).where(eq(prospectExports.id, Number(result[0].insertId))).limit(1))[0]!;
+}
+
+export async function listProspectExports(ownerId: number, prospectId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(prospectExports).where(and(eq(prospectExports.ownerId, ownerId), eq(prospectExports.prospectId, prospectId))).orderBy(desc(prospectExports.exportedAt));
+}
+
+const DEFAULT_TEMPLATES = [
+  {
+    name: "Cualificación inicial",
+    type: "qualification" as const,
+    subject: null,
+    body: "Negocio: {{business_name}}\nUbicación: {{location}}\nPuntaje: {{opportunity_score}}\n\nSeñales a revisar:\n{{opportunity_reasons}}\n\nNotas de cualificación:\n",
+  },
+  {
+    name: "Contacto: oportunidad web",
+    type: "contact" as const,
+    subject: "Una oportunidad para la presencia digital de {{business_name}}",
+    body: "Hola, equipo de {{business_name}}:\n\nEstoy revisando negocios de {{location}} y detecté una oportunidad potencial para fortalecer su presencia digital. Si les parece oportuno, puedo compartir una revisión breve y sin compromiso basada en señales públicas de su sitio y perfil local.\n\nSaludos,\n{{sender_name}}",
+  },
+];
+
+export async function getOrCreateQualificationTemplates(ownerId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const current = await db.select().from(qualificationTemplates).where(eq(qualificationTemplates.ownerId, ownerId)).orderBy(desc(qualificationTemplates.updatedAt));
+  if (current.length) return current;
+  await db.insert(qualificationTemplates).values(DEFAULT_TEMPLATES.map((template, index) => ({ ...template, ownerId, isDefault: index === 0 ? 1 : 0 })));
+  return db.select().from(qualificationTemplates).where(eq(qualificationTemplates.ownerId, ownerId)).orderBy(desc(qualificationTemplates.updatedAt));
+}
+
+export async function createQualificationTemplate(ownerId: number, data: { name: string; type: "qualification" | "contact"; subject?: string | null; body: string; isDefault?: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const result = await db.insert(qualificationTemplates).values({ ownerId, ...data });
+  return (await db.select().from(qualificationTemplates).where(eq(qualificationTemplates.id, Number(result[0].insertId))).limit(1))[0]!;
+}
+
+export async function updateQualificationTemplate(ownerId: number, templateId: number, data: Partial<{ name: string; subject: string | null; body: string; isDefault: number }>) {
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.update(qualificationTemplates).set(data).where(and(eq(qualificationTemplates.id, templateId), eq(qualificationTemplates.ownerId, ownerId)));
+  return (await db.select().from(qualificationTemplates).where(and(eq(qualificationTemplates.id, templateId), eq(qualificationTemplates.ownerId, ownerId))).limit(1))[0];
+}
+
+export async function deleteQualificationTemplate(ownerId: number, templateId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(qualificationTemplates).where(and(eq(qualificationTemplates.id, templateId), eq(qualificationTemplates.ownerId, ownerId)));
 }
 
 export async function getScannerDashboard(ownerId: number) {

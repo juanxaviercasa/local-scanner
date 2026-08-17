@@ -47,7 +47,7 @@ export const searchProfiles = mysqlTable("searchProfiles", {
   minReviewCount: int("minReviewCount").default(0).notNull(),
   minOpportunityScore: int("minOpportunityScore").default(0).notNull(),
   websiteMode: mysqlEnum("websiteMode", ["no_website", "with_website", "both"]).default("both").notNull(),
-  provider: mysqlEnum("provider", ["google_maps"]).default("google_maps").notNull(),
+  provider: mysqlEnum("provider", ["google_maps", "csv_import", "manual_entry"]).default("csv_import").notNull(),
   scoringProfileId: int("scoringProfileId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -95,7 +95,7 @@ export const prospectingRuns = mysqlTable("prospectingRuns", {
   ownerId: int("ownerId").notNull(),
   publicId: varchar("publicId", { length: 32 }).notNull().unique(),
   status: mysqlEnum("status", ["queued", "running", "paused", "completed", "partial", "failed", "cancelled"]).default("queued").notNull(),
-  provider: mysqlEnum("provider", ["google_maps"]).default("google_maps").notNull(),
+  provider: mysqlEnum("provider", ["google_maps", "csv_import", "manual_entry"]).default("csv_import").notNull(),
   query: varchar("query", { length: 300 }).notNull(),
   country: varchar("country", { length: 80 }).notNull(),
   region: varchar("region", { length: 120 }),
@@ -230,6 +230,51 @@ export const usageRecords = mysqlTable("usageRecords", {
   estimatedCostCents: int("estimatedCostCents").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, table => [index("usage_owner_created_idx").on(table.ownerId, table.createdAt)]);
+
+/** Auditoría de entregas de prospectos a destinos externos autorizados. */
+export const prospectExports = mysqlTable("prospectExports", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  prospectId: int("prospectId").notNull(),
+  destination: mysqlEnum("destination", ["google_sheets"]).notNull(),
+  destinationLabel: varchar("destinationLabel", { length: 160 }).notNull(),
+  externalReference: varchar("externalReference", { length: 512 }),
+  status: mysqlEnum("status", ["succeeded", "failed"]).notNull(),
+  errorMessage: varchar("errorMessage", { length: 1000 }),
+  exportedAt: timestamp("exportedAt").defaultNow().notNull(),
+}, table => [index("prospect_exports_owner_idx").on(table.ownerId, table.exportedAt), index("prospect_exports_prospect_idx").on(table.prospectId)]);
+
+/** Historial de análisis técnico sobre un sitio público indicado por el propio negocio. */
+export const websiteAnalyses = mysqlTable("websiteAnalyses", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  prospectId: int("prospectId").notNull(),
+  provider: mysqlEnum("provider", ["pagespeed_insights"]).default("pagespeed_insights").notNull(),
+  url: varchar("url", { length: 2048 }).notNull(),
+  strategy: mysqlEnum("strategy", ["mobile", "desktop"]).default("mobile").notNull(),
+  status: mysqlEnum("status", ["completed", "failed", "skipped"]).notNull(),
+  performanceScore: int("performanceScore"),
+  accessibilityScore: int("accessibilityScore"),
+  bestPracticesScore: int("bestPracticesScore"),
+  seoScore: int("seoScore"),
+  signals: json("signals").$type<Record<string, boolean | number | string | null>>(),
+  summary: text("summary"),
+  errorMessage: varchar("errorMessage", { length: 1000 }),
+  analyzedAt: timestamp("analyzedAt").defaultNow().notNull(),
+}, table => [index("website_analyses_prospect_idx").on(table.prospectId, table.analyzedAt)]);
+
+/** Plantillas controladas por cada cuenta para cualificación y contacto, sin envío automático. */
+export const qualificationTemplates = mysqlTable("qualificationTemplates", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  type: mysqlEnum("type", ["qualification", "contact"]).notNull(),
+  subject: varchar("subject", { length: 180 }),
+  body: text("body").notNull(),
+  isDefault: int("isDefault").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [index("qualification_templates_owner_type_idx").on(table.ownerId, table.type)]);
 
 /**
  * Tablas heredadas del primer prototipo. Se conservan temporalmente para no

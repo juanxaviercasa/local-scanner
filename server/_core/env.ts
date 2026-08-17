@@ -7,4 +7,9 @@ export const ENV = {
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  googleServiceAccountJson: process.env.NEXO_GOOGLE_SERVICE_ACCOUNT_JSON ?? "",
+  googleSheetsSpreadsheetId: process.env.NEXO_GOOGLE_SHEETS_SPREADSHEET_ID ?? "",
+  googleSheetsTab: process.env.NEXO_GOOGLE_SHEETS_TAB ?? "Prospectos",
+  googlePageSpeedApiKey: process.env.NEXO_GOOGLE_PAGESPEED_API_KEY ?? "",
+  paidConnectorsEnabled: process.env.NEXO_ENABLE_PAID_CONNECTORS === "true",
 };

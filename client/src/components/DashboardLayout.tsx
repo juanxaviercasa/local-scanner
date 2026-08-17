@@ -2,7 +2,7 @@ import { startLogin } from "@/const";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { BarChart3, Compass, History, LayoutDashboard, LogOut, Settings2, ShieldCheck, Target } from "lucide-react";
+import { BarChart3, Compass, FileText, History, LayoutDashboard, LogOut, Settings2, ShieldCheck, Target } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 
@@ -11,6 +11,7 @@ const navigation = [
   { href: "/app/nueva-prospeccion", label: "Nueva prospección", icon: Compass },
   { href: "/app/prospectos", label: "Oportunidades", icon: Target },
   { href: "/app/historial", label: "Historial", icon: History },
+  { href: "/app/plantillas", label: "Plantillas", icon: FileText },
   { href: "/app/configuracion", label: "Configuración", icon: Settings2 },
 ];
 

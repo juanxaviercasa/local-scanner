@@ -3,28 +3,39 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { ENV } from "./_core/env";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
+  createQualificationTemplate,
   createRawSearchResult,
   createRunEvent,
   createRunProspect,
   createProspectingRun,
   createSearchProfile,
   createUsageRecord,
+  createWebsiteAnalysis,
+  deleteQualificationTemplate,
   getOrCreateBudgetSettings,
   getOrCreateDefaultScoringProfile,
+  getOrCreateQualificationTemplates,
   getProspect,
   getProspectingRun,
   getScannerDashboard,
   getUsageSummary,
+  listProspectExports,
   listProspectingRuns,
   listProspects,
   listRunEvents,
   listScoringProfiles,
   listSearchProfiles,
   listUsers,
+  listWebsiteAnalyses,
+  recordProspectExport,
+  updateAnalyzedProspect,
   updateBudgetSettings,
+  updateBusinessWebsiteAnalysis,
+  updateQualificationTemplate,
   updateRunProspect,
   updateScoringProfile,
   updateUserProfile,
@@ -32,9 +43,11 @@ import {
   updateProspectingRun,
   upsertBusinessFromProvider,
 } from "./db";
+import { appendRowsToGoogleSheet, isGoogleSheetsConfigured } from "./googleSheets";
 import { buildProviderQuery, findGoogleBusinesses, type SearchPlan } from "./googlePlacesProvider";
 import { actualUsageStaysWithinPlan, buildCsvDocument, calculateProspectingPlan, getConfiguredCostPerOperationCents } from "./scannerPolicies";
 import { DEFAULT_SCORING_THRESHOLDS, DEFAULT_SCORING_WEIGHTS, scoreBusiness } from "./scoring";
+import { analyzePublicWebsite, isPageSpeedConfigured } from "./websiteAnalyzer";
 
 const websiteStatusSchema = z.enum(["no_website", "website_found", "website_unreachable", "website_unknown"]);
 const prioritySchema = z.enum(["p0", "p1", "p2", "p3", "ignore"]);
@@ -57,6 +70,25 @@ const searchInput = z.object({
   websiteMode: z.enum(["no_website", "with_website", "both"]).default("both"),
 });
 
+const importRecordInput = z.object({
+  externalId: z.string().trim().max(255).optional(),
+  name: z.string().trim().min(2).max(255),
+  category: z.string().trim().max(120).nullable().optional(),
+  address: z.string().trim().max(500).nullable().optional(),
+  city: z.string().trim().max(120).nullable().optional(),
+  region: z.string().trim().max(120).nullable().optional(),
+  country: z.string().trim().max(80).nullable().optional(),
+  phone: z.string().trim().max(64).nullable().optional(),
+  website: z.string().trim().url().max(1024).nullable().optional(),
+  rating: z.number().min(0).max(5).nullable().optional(),
+  reviewCount: z.number().int().min(0).max(1000000).nullable().optional(),
+});
+
+const importInput = searchInput.extend({
+  source: z.enum(["csv_import", "manual_entry"]),
+  records: z.array(importRecordInput).min(1).max(500),
+});
+
 type SearchInput = z.infer<typeof searchInput>;
 
 function asNumberRecord(value: unknown, fallback: Record<string, number>) {
@@ -69,11 +101,48 @@ function domainFromUrl(value?: string) {
   try { return new URL(value).hostname.replace(/^www\./, "").toLowerCase(); } catch { return null; }
 }
 
-function dataQualityOf(business: { address?: string; phone?: string; website?: string; rating?: number; reviewCount?: number }) {
+function dataQualityOf(business: { address?: string | null; phone?: string | null; website?: string | null; rating?: number | null; reviewCount?: number | null }) {
   return [business.address, business.phone, business.website, business.rating !== undefined, business.reviewCount !== undefined].filter(Boolean).length * 20;
 }
 
+function identityFragment(value?: string | null) {
+  return (value ?? "").toLocaleLowerCase("es").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function exportRowFromProspect({ prospect, business }: Awaited<ReturnType<typeof listProspects>>[number]) {
+  return {
+    lead_id: `lead_${business.id}`, business_name: business.name, category: business.category, location: [business.city, business.region, business.country].filter(Boolean).join(", "), address: business.address, phone: business.phone, website: business.website,
+    website_status: business.websiteStatus, website_quality: business.websiteQuality, google_maps_url: business.googleMapsUrl, google_rating: business.rating, google_review_count: business.reviewCount, social_profiles: business.socialProfiles,
+    whatsapp: business.whatsappUrl, booking: business.bookingUrl, opportunity_score: prospect.opportunityScore, business_attractiveness_score: prospect.businessAttractivenessScore, digital_opportunity_score: prospect.digitalOpportunityScore,
+    website_opportunity_score: prospect.websiteOpportunityScore, commercial_potential_score: prospect.commercialPotentialScore, lead_potential_score: prospect.leadPotentialScore, urgency_score: prospect.urgencyScore,
+    priority: prospect.priority, opportunity_types: prospect.opportunityTypes, opportunity_reasons: prospect.scoreReasons, ai_summary: prospect.analysisSummary, source: business.source, date_analyzed: prospect.lastCheckedAt.toISOString(),
+  };
+}
+
+export function renderTemplate(value: string | null, replacements: Record<string, string>) {
+  if (!value) return null;
+  return value.replace(/{{([a-z_]+)}}/g, (_, token: string) => replacements[token] ?? `{{${token}}}`);
+}
+
+export function assertGoogleSheetsEligibility(statuses: string[]) {
+  if (statuses.some(status => status !== "qualified")) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Solo se pueden entregar a Google Sheets prospectos cualificados. Actualiza el estado a «Aprobado» antes de exportar." });
+  }
+}
+
 async function executeRun(ownerId: number, input: SearchInput) {
+  if (!ENV.paidConnectorsEnabled) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Google Places permanece inactivo como placeholder en el modo sin coste. Para usarlo, configura sus credenciales y habilita NEXO_ENABLE_PAID_CONNECTORS=true de forma explícita.",
+    });
+  }
+  if (!ENV.forgeApiKey || !ENV.forgeApiUrl) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Google Places no está configurado. Añade las credenciales autorizadas antes de activar el conector.",
+    });
+  }
   const budget = await getOrCreateBudgetSettings(ownerId);
   const usage = await getUsageSummary(ownerId);
   const plan = calculateProspectingPlan(input, budget, usage, getConfiguredCostPerOperationCents());
@@ -83,7 +152,7 @@ async function executeRun(ownerId: number, input: SearchInput) {
   const thresholds = asNumberRecord(scoring.thresholds, DEFAULT_SCORING_THRESHOLDS);
   const query = buildProviderQuery({ country: input.country, city: input.city, district: input.district, referenceAddress: input.referenceAddress, category: input.primaryCategory, keywords: input.keywords, radiusMeters: input.radiusMeters, maxResults: plan.requested });
   const run = await createProspectingRun({
-    ownerId, publicId: `RUN-${nanoid(8).toUpperCase()}`, query, country: input.country, city: input.city, district: input.district ?? null, referenceAddress: input.referenceAddress ?? null,
+    ownerId, publicId: `RUN-${nanoid(8).toUpperCase()}`, provider: "google_maps", query, country: input.country, city: input.city, district: input.district ?? null, referenceAddress: input.referenceAddress ?? null,
     radiusMeters: input.radiusMeters, primaryCategory: input.primaryCategory, keywords: input.keywords, excludedKeywords: input.excludedKeywords, websiteMode: input.websiteMode,
     maxResults: plan.requested, minRating: input.minRating ?? null, minReviewCount: input.minReviewCount, minOpportunityScore: input.minOpportunityScore, scoringSnapshot: { ...weights, ...thresholds },
     estimatedOperations: plan.estimatedOperations, estimatedCostCents: plan.estimatedCostCents,
@@ -148,6 +217,78 @@ async function executeRun(ownerId: number, input: SearchInput) {
   return getProspectingRun(run.id, ownerId);
 }
 
+async function importBusinesses(ownerId: number, input: z.infer<typeof importInput>) {
+  const scoring = await getOrCreateDefaultScoringProfile(ownerId);
+  const weights = asNumberRecord(scoring.weights, DEFAULT_SCORING_WEIGHTS);
+  const thresholds = asNumberRecord(scoring.thresholds, DEFAULT_SCORING_THRESHOLDS);
+  const sourceLabel = input.source === "csv_import" ? "Importación CSV" : "Entrada manual";
+  const run = await createProspectingRun({
+    ownerId,
+    publicId: `IMP-${nanoid(8).toUpperCase()}`,
+    provider: input.source,
+    query: `${sourceLabel}: ${input.primaryCategory} en ${input.city}`,
+    country: input.country,
+    city: input.city,
+    district: input.district ?? null,
+    referenceAddress: input.referenceAddress ?? null,
+    radiusMeters: input.radiusMeters,
+    primaryCategory: input.primaryCategory,
+    keywords: input.keywords,
+    excludedKeywords: input.excludedKeywords,
+    websiteMode: input.websiteMode,
+    maxResults: input.records.length,
+    minRating: input.minRating ?? null,
+    minReviewCount: input.minReviewCount,
+    minOpportunityScore: input.minOpportunityScore,
+    scoringSnapshot: { ...weights, ...thresholds },
+    estimatedOperations: 0,
+    estimatedCostCents: 0,
+  });
+  await updateProspectingRun(run.id, ownerId, { status: "running", startedAt: new Date() });
+  await createRunEvent({ runId: run.id, stage: "plan", message: `${sourceLabel} confirmada: ${input.records.length} registros locales sin consulta externa.` });
+  await createRunEvent({ runId: run.id, stage: "budget", message: "No se reservó presupuesto de proveedores; esta importación no realiza solicitudes externas." });
+
+  let processed = 0;
+  let qualified = 0;
+  const unique = new Map<string, z.infer<typeof importRecordInput>>();
+  for (const record of input.records) {
+    const deduplicationKey = [identityFragment(record.name), identityFragment(record.address), identityFragment(record.website ?? record.phone)].filter(Boolean).join(":");
+    if (deduplicationKey && !unique.has(deduplicationKey)) unique.set(deduplicationKey, record);
+  }
+  await createRunEvent({ runId: run.id, stage: "deduplicate", message: `${input.records.length - unique.size} registros repetidos se descartaron usando nombre y datos de contacto disponibles.` });
+
+  try {
+    for (const [deduplicationKey, record] of Array.from(unique.entries())) {
+      const websiteStatus = record.website ? "website_found" : "no_website";
+      if (input.websiteMode === "no_website" && websiteStatus !== "no_website") continue;
+      if (input.websiteMode === "with_website" && websiteStatus !== "website_found") continue;
+      if (input.minRating !== null && input.minRating !== undefined && (record.rating ?? 0) < input.minRating) continue;
+      if ((record.reviewCount ?? 0) < input.minReviewCount) continue;
+      const externalId = record.externalId || `${input.source}:${deduplicationKey || nanoid(10)}`;
+      await createRawSearchResult({ runId: run.id, provider: input.source, providerRecordId: externalId, query: run.query, payload: record });
+      const saved = await upsertBusinessFromProvider({
+        ownerId, source: input.source, externalId, deduplicationKey: `${input.source}:${deduplicationKey || externalId}`,
+        name: record.name, category: record.category || input.primaryCategory, categories: record.category ? [record.category] : [input.primaryCategory],
+        address: record.address ?? null, city: record.city || input.city, region: record.region ?? null, country: record.country || input.country,
+        phone: record.phone ?? null, website: record.website ?? null, domain: domainFromUrl(record.website ?? undefined), rating: record.rating ?? null, reviewCount: record.reviewCount ?? null,
+        websiteStatus, dataQualityScore: dataQualityOf(record),
+      });
+      const evaluated = scoreBusiness({ rating: record.rating, reviewCount: record.reviewCount, websiteStatus, websiteQuality: "not_analyzed", hasPhone: Boolean(record.phone), hasBooking: false, hasWhatsapp: false, commercialPotential: "medium" }, weights, thresholds);
+      const status = evaluated.opportunityScore >= input.minOpportunityScore ? "qualified" : "rejected";
+      await createRunProspect({ runId: run.id, businessId: saved.business.id, duplicateConfidence: saved.isKnown ? "exact" : "high", status, ...evaluated, scoreReasons: evaluated.reasons, analysisSummary: evaluated.summary });
+      processed += 1;
+      if (status === "qualified") qualified += 1;
+    }
+    await updateProspectingRun(run.id, ownerId, { status: "completed", foundCount: input.records.length, uniqueCount: unique.size, qualifiedCount: qualified, rejectedCount: processed - qualified, finishedAt: new Date() });
+    await createRunEvent({ runId: run.id, stage: "score", message: `${processed} registros importados se puntuaron; ${qualified} superaron el umbral.` });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo completar la importación.";
+    await updateProspectingRun(run.id, ownerId, { status: processed ? "partial" : "failed", foundCount: input.records.length, uniqueCount: unique.size, qualifiedCount: qualified, rejectedCount: Math.max(0, processed - qualified), errorCount: 1, finishedAt: new Date() });
+    await createRunEvent({ runId: run.id, stage: "normalize", level: "error", errorCode: "IMPORT_PROCESSING_ERROR", recoverable: 1, message: `La importación se detuvo: ${message}` });
+  }
+  return getProspectingRun(run.id, ownerId);
+}
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -164,9 +305,24 @@ export const appRouter = router({
   }),
   integrations: router({
     status: protectedProcedure.query(() => ({
-      googleMaps: { configured: Boolean(process.env.BUILT_IN_FORGE_API_KEY && process.env.BUILT_IN_FORGE_API_URL), mode: "official_proxy" as const },
-      googleSheets: { configured: Boolean(process.env.NEXO_GOOGLE_SHEETS_WEBHOOK_URL), mode: "placeholder" as const },
-      websiteAnalyzer: { configured: Boolean(process.env.NEXO_WEBSITE_ANALYZER_URL), mode: "placeholder" as const },
+      googleMaps: {
+        configured: Boolean(ENV.paidConnectorsEnabled && ENV.forgeApiKey && ENV.forgeApiUrl),
+        state: ENV.paidConnectorsEnabled && ENV.forgeApiKey && ENV.forgeApiUrl ? "activo" as const : "placeholder_inactivo" as const,
+        mode: "official_proxy" as const,
+        activation: "Configura el acceso oficial y establece NEXO_ENABLE_PAID_CONNECTORS=true.",
+      },
+      googleSheets: {
+        configured: isGoogleSheetsConfigured(),
+        state: isGoogleSheetsConfigured() ? "activo" as const : "placeholder_inactivo" as const,
+        mode: "service_account" as const,
+        activation: "Añade la cuenta de servicio, el ID de la hoja y establece NEXO_ENABLE_PAID_CONNECTORS=true.",
+      },
+      websiteAnalyzer: {
+        configured: isPageSpeedConfigured(),
+        state: isPageSpeedConfigured() ? "activo" as const : "placeholder_inactivo" as const,
+        mode: "pagespeed_insights" as const,
+        activation: "Añade la API key de PageSpeed y establece NEXO_ENABLE_PAID_CONNECTORS=true; la comprobación pública básica seguirá disponible.",
+      },
     })),
   }),
   settings: router({
@@ -191,6 +347,7 @@ export const appRouter = router({
       return { query: buildProviderQuery({ country: input.country, city: input.city, district: input.district, referenceAddress: input.referenceAddress, category: input.primaryCategory, keywords: input.keywords, radiusMeters: input.radiusMeters, maxResults: input.maxResults }), plan: calculateProspectingPlan(input, budget, usage, getConfiguredCostPerOperationCents()), budget, usage, scoringProfile: { id: scoring.id, name: scoring.name } };
     }),
     execute: protectedProcedure.input(searchInput.extend({ confirmed: z.literal(true) })).mutation(({ ctx, input }) => executeRun(ctx.user.id, input)),
+    import: protectedProcedure.input(importInput.extend({ confirmed: z.literal(true) })).mutation(({ ctx, input }) => importBusinesses(ctx.user.id, input)),
     list: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional()).query(({ ctx, input }) => listProspectingRuns(ctx.user.id, input?.limit ?? 30)),
     get: protectedProcedure.input(z.object({ runId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       const run = await getProspectingRun(input.runId, ctx.user.id);
@@ -225,19 +382,82 @@ export const appRouter = router({
     exportRows: protectedProcedure.input(z.object({ prospectIds: z.array(z.number().int().positive()).min(1).max(500) })).query(async ({ ctx, input }) => {
       const all = await listProspects(ctx.user.id, { limit: 5000 });
       const selected = all.filter(item => input.prospectIds.includes(item.prospect.id));
-      return selected.map(({ prospect, business }) => ({
-        lead_id: `lead_${business.id}`, business_name: business.name, category: business.category, location: [business.city, business.region, business.country].filter(Boolean).join(", "), address: business.address, phone: business.phone, website: business.website,
-        website_status: business.websiteStatus, website_quality: business.websiteQuality, google_maps_url: business.googleMapsUrl, google_rating: business.rating, google_review_count: business.reviewCount, social_profiles: business.socialProfiles,
-        whatsapp: business.whatsappUrl, booking: business.bookingUrl, opportunity_score: prospect.opportunityScore, business_attractiveness_score: prospect.businessAttractivenessScore, digital_opportunity_score: prospect.digitalOpportunityScore,
-        website_opportunity_score: prospect.websiteOpportunityScore, commercial_potential_score: prospect.commercialPotentialScore, lead_potential_score: prospect.leadPotentialScore, urgency_score: prospect.urgencyScore,
-        priority: prospect.priority, opportunity_types: prospect.opportunityTypes, opportunity_reasons: prospect.scoreReasons, ai_summary: prospect.analysisSummary, source: business.source, date_analyzed: prospect.lastCheckedAt.toISOString(),
-      }));
+      return selected.map(exportRowFromProspect);
     }),
     exportCsv: protectedProcedure.input(z.object({ prospectIds: z.array(z.number().int().positive()).min(1).max(500) })).mutation(async ({ ctx, input }) => {
       const all = await listProspects(ctx.user.id, { limit: 5000 });
-      const rows = all.filter(item => input.prospectIds.includes(item.prospect.id)).map(({ prospect, business }) => ({ lead_id: `lead_${business.id}`, business_name: business.name, category: business.category, location: [business.city, business.region, business.country].filter(Boolean).join(", "), address: business.address, phone: business.phone, website: business.website, website_status: business.websiteStatus, website_quality: business.websiteQuality, google_maps_url: business.googleMapsUrl, google_rating: business.rating, google_review_count: business.reviewCount, social_profiles: business.socialProfiles, whatsapp: business.whatsappUrl, booking: business.bookingUrl, opportunity_score: prospect.opportunityScore, business_attractiveness_score: prospect.businessAttractivenessScore, digital_opportunity_score: prospect.digitalOpportunityScore, website_opportunity_score: prospect.websiteOpportunityScore, commercial_potential_score: prospect.commercialPotentialScore, lead_potential_score: prospect.leadPotentialScore, urgency_score: prospect.urgencyScore, priority: prospect.priority, opportunity_types: prospect.opportunityTypes, opportunity_reasons: prospect.scoreReasons, ai_summary: prospect.analysisSummary, source: business.source, date_analyzed: prospect.lastCheckedAt.toISOString() }));
-      const headers = Object.keys(rows[0] ?? { lead_id: "" });
+      const rows = all.filter(item => input.prospectIds.includes(item.prospect.id)).map(exportRowFromProspect);
       return { filename: `nexo-prospectos-${new Date().toISOString().slice(0, 10)}.csv`, csv: buildCsvDocument(rows) };
+    }),
+    exportGoogleSheets: protectedProcedure.input(z.object({ prospectIds: z.array(z.number().int().positive()).min(1).max(500) })).mutation(async ({ ctx, input }) => {
+      if (!isGoogleSheetsConfigured()) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Google Sheets está inactivo como placeholder. Activa sus credenciales y NEXO_ENABLE_PAID_CONNECTORS=true para habilitar esta entrega." });
+      }
+      const all = await listProspects(ctx.user.id, { limit: 5000 });
+      const selected = all.filter(item => input.prospectIds.includes(item.prospect.id));
+      if (selected.length !== input.prospectIds.length) throw new TRPCError({ code: "NOT_FOUND", message: "Uno o más prospectos no están disponibles para exportar." });
+      assertGoogleSheetsEligibility(selected.map(item => item.prospect.status));
+      try {
+        const output = await appendRowsToGoogleSheet(selected.map(exportRowFromProspect));
+        await Promise.all(selected.map(item => Promise.all([
+          recordProspectExport({ ownerId: ctx.user.id, prospectId: item.prospect.id, destination: "google_sheets", destinationLabel: output.destinationLabel, externalReference: output.externalReference, status: "succeeded" }),
+          updateRunProspect(ctx.user.id, item.prospect.id, { status: "exported" }),
+        ])));
+        return output;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "No se pudo entregar la exportación a Google Sheets.";
+        await Promise.all(selected.map(item => recordProspectExport({ ownerId: ctx.user.id, prospectId: item.prospect.id, destination: "google_sheets", destinationLabel: "Google Sheets", status: "failed", errorMessage: message.slice(0, 1000) })));
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message });
+      }
+    }),
+    exports: protectedProcedure.input(z.object({ prospectId: z.number().int().positive() })).query(({ ctx, input }) => listProspectExports(ctx.user.id, input.prospectId)),
+    analyzeWebsite: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), strategy: z.enum(["mobile", "desktop"]).default("mobile") })).mutation(async ({ ctx, input }) => {
+      const current = await getProspect(ctx.user.id, input.prospectId);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
+      if (!current.business.website) {
+        await createWebsiteAnalysis({ ownerId: ctx.user.id, prospectId: input.prospectId, url: "", strategy: input.strategy, status: "skipped", summary: "No se analizó porque la fuente autorizada no proporcionó sitio web." });
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Este negocio no tiene un sitio web público para analizar." });
+      }
+      try {
+        const result = await analyzePublicWebsite(current.business.website, input.strategy);
+        await createWebsiteAnalysis({ ownerId: ctx.user.id, prospectId: input.prospectId, url: current.business.website, strategy: result.strategy, status: "completed", performanceScore: result.performanceScore, accessibilityScore: result.accessibilityScore, bestPracticesScore: result.bestPracticesScore, seoScore: result.seoScore, signals: result.signals, summary: result.summary });
+        await updateBusinessWebsiteAnalysis(ctx.user.id, current.business.id, { websiteQuality: result.quality, websiteSignals: result.signals });
+        const scoring = await getOrCreateDefaultScoringProfile(ctx.user.id);
+        const evaluated = scoreBusiness({ rating: Number(current.business.rating ?? 0), reviewCount: current.business.reviewCount ?? 0, websiteStatus: current.business.websiteStatus, websiteQuality: result.quality, hasPhone: Boolean(current.business.phone), hasBooking: Boolean(current.business.bookingUrl), hasWhatsapp: Boolean(current.business.whatsappUrl), commercialPotential: "medium" }, asNumberRecord(scoring.weights, DEFAULT_SCORING_WEIGHTS), asNumberRecord(scoring.thresholds, DEFAULT_SCORING_THRESHOLDS));
+        const updated = await updateAnalyzedProspect(ctx.user.id, input.prospectId, { status: "analyzed", ...evaluated, scoreReasons: evaluated.reasons, analysisSummary: result.summary, analysisConfidence: 0.9 });
+        return { analysis: result, prospect: updated };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "No se pudo completar el análisis autorizado.";
+        await createWebsiteAnalysis({ ownerId: ctx.user.id, prospectId: input.prospectId, url: current.business.website, strategy: input.strategy, status: "failed", errorMessage: message.slice(0, 1000) });
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message });
+      }
+    }),
+    analyses: protectedProcedure.input(z.object({ prospectId: z.number().int().positive() })).query(({ ctx, input }) => listWebsiteAnalyses(ctx.user.id, input.prospectId)),
+  }),
+  templates: router({
+    list: protectedProcedure.query(({ ctx }) => getOrCreateQualificationTemplates(ctx.user.id)),
+    create: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(120), type: z.enum(["qualification", "contact"]), subject: z.string().trim().max(180).nullable().optional(), body: z.string().trim().min(5).max(10000), isDefault: z.number().int().min(0).max(1).optional() })).mutation(({ ctx, input }) => createQualificationTemplate(ctx.user.id, input)),
+    update: protectedProcedure.input(z.object({ templateId: z.number().int().positive(), name: z.string().trim().min(2).max(120).optional(), subject: z.string().trim().max(180).nullable().optional(), body: z.string().trim().min(5).max(10000).optional(), isDefault: z.number().int().min(0).max(1).optional() })).mutation(async ({ ctx, input }) => {
+      const { templateId, ...data } = input;
+      const updated = await updateQualificationTemplate(ctx.user.id, templateId, data);
+      if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró la plantilla." });
+      return updated;
+    }),
+    remove: protectedProcedure.input(z.object({ templateId: z.number().int().positive() })).mutation(({ ctx, input }) => deleteQualificationTemplate(ctx.user.id, input.templateId)),
+    render: protectedProcedure.input(z.object({ templateId: z.number().int().positive(), prospectId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      const [templates, item] = await Promise.all([getOrCreateQualificationTemplates(ctx.user.id), getProspect(ctx.user.id, input.prospectId)]);
+      const template = templates.find(row => row.id === input.templateId);
+      if (!template || !item) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró la plantilla o el prospecto." });
+      const replacements = {
+        business_name: item.business.name,
+        location: [item.business.city, item.business.region, item.business.country].filter(Boolean).join(", "),
+        opportunity_score: String(item.prospect.opportunityScore),
+        opportunity_reasons: item.prospect.scoreReasons.map(reason => `• ${reason.label} (${reason.points >= 0 ? "+" : ""}${reason.points})`).join("\n"),
+        website: item.business.website ?? "Sin sitio detectado",
+        website_status: item.business.websiteStatus,
+        sender_name: ctx.user.name ?? "Equipo de Nexo",
+      };
+      return { templateId: template.id, name: template.name, type: template.type, subject: renderTemplate(template.subject, replacements), body: renderTemplate(template.body, replacements), sending: false };
     }),
   }),
   profile: router({

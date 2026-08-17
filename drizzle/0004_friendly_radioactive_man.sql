@@ -1,0 +1,2 @@
+ALTER TABLE `prospectingRuns` MODIFY COLUMN `provider` enum('google_maps','csv_import','manual_entry') NOT NULL DEFAULT 'csv_import';--> statement-breakpoint
+ALTER TABLE `searchProfiles` MODIFY COLUMN `provider` enum('google_maps','csv_import','manual_entry') NOT NULL DEFAULT 'csv_import';

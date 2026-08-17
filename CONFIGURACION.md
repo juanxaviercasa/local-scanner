@@ -2,20 +2,40 @@
 
 ## Alcance de esta aplicación
 
-**Nexo Local** es el primer eslabón de un flujo de adquisición de clientes locales. Recibe una ubicación y una categoría, consulta una fuente de datos autorizada, conserva los datos recibidos, calcula un puntaje explicable y prepara oportunidades exportables. No realiza campañas de mensajería, generación de webs, automatización comercial ni enriquecimiento no verificable.
+**Nexo Local** es el primer eslabón de un flujo de adquisición de clientes locales. Puede recibir negocios desde una importación CSV, una entrada manual o un proveedor autorizado opcional; conserva los datos recibidos, calcula un puntaje explicable y prepara oportunidades exportables. No realiza campañas de mensajería, generación de webs, automatización comercial ni enriquecimiento no verificable.
 
-> La aplicación no utiliza scraping de interfaces de Google Maps. El proveedor integrado utiliza los endpoints autorizados de Places mediante el proxy gestionado del proyecto. Si una fuente no devuelve un campo, Nexo lo conserva como **No encontrado** o **No analizado**.
+> La aplicación no utiliza scraping de interfaces de Google Maps ni código para eludir sus controles. La importación CSV y manual son las fuentes predeterminadas sin coste. Si se activa Google Places, el proveedor usa únicamente los endpoints autorizados mediante el proxy gestionado del proyecto. Si una fuente no devuelve un campo, Nexo lo conserva como **No encontrado** o **No analizado**.
+
+> **Modo sin coste predeterminado.** Sin variables de integración configuradas, Nexo no solicita ni consume APIs de pago. Puede importar negocios desde CSV o entrada manual, normalizarlos, deduplicarlos, evaluar señales públicas seguras de sus sitios, calcular el Opportunity Score, generar borradores de cualificación y descargar CSV. Google Places, Google Sheets y PageSpeed permanecen como placeholders desactivados hasta que el operador configure sus propios secretos **y** habilite de manera expresa el interruptor de conectores comerciales.
 
 ## Variables configurables
 
 | Variable | Obligatoria | Función | Ejemplo seguro |
 |---|---:|---|---|
-| `NEXO_GOOGLE_PLACES_ESTIMATED_COST_CENTS` | No | Coste estimado por operación del proveedor, en céntimos. Sirve para la previsualización y los topes por prospección; no modifica la facturación del proveedor. | `0` |
-| `NEXO_GOOGLE_SHEETS_WEBHOOK_URL` | No | Placeholder de un endpoint autorizado que recibirá filas aprobadas para una hoja de cálculo. No se enviarán datos a dicho endpoint hasta añadir la integración de entrega correspondiente. | `https://tu-servicio.example/webhooks/sheets` |
-| `NEXO_WEBSITE_ANALYZER_URL` | No | Placeholder para un analizador de sitios externo y autorizado. La versión actual sólo declara el estado de integración; no llama a esta URL. | `https://tu-servicio.example/website-audit` |
-| `NEXO_WEBSITE_ANALYZER_API_KEY` | No | Credencial secreta del analizador de sitios. Debe cargarse sólo como secreto, nunca en el cliente ni en el repositorio. | `completar-como-secreto` |
+| `NEXO_ENABLE_PAID_CONNECTORS` | No | Interruptor explícito de todos los conectores comerciales. Debe ser exactamente `true` además de las credenciales particulares de cada proveedor. Si falta o tiene otro valor, todos quedan bloqueados como placeholders. | `true` |
+| `NEXO_GOOGLE_PLACES_ESTIMATED_COST_CENTS` | No | Coste estimado por operación de Google Places, en céntimos. Solo se usa cuando el operador selecciona este conector oficial. | `0` |
+| `NEXO_GOOGLE_SERVICE_ACCOUNT_JSON` | No | Credencial JSON de la cuenta de servicio con la que se escriben prospectos aprobados en Google Sheets. | `completar-como-secreto` |
+| `NEXO_GOOGLE_SHEETS_SPREADSHEET_ID` | No | Identificador de la hoja de cálculo destino. La cuenta de servicio debe tener acceso de Editor. | `1EjemploHoja...` |
+| `NEXO_GOOGLE_SHEETS_TAB` | No | Nombre de la pestaña destino; si se omite, se utiliza `Prospectos`. | `Prospectos` |
+| `NEXO_GOOGLE_PAGESPEED_API_KEY` | No | Clave de PageSpeed Insights. Añade métricas Lighthouse al análisis de sitio; sin ella se mantiene una comprobación pública básica. | `completar-como-secreto` |
 
-Las variables se añaden desde el panel de secretos del proyecto. **No** se deben colocar en archivos `.env` versionados ni dentro de código de cliente. La ruta `integrations.status` informa únicamente si un placeholder está configurado; nunca revela valores.
+Las variables se añaden desde el panel de secretos del proyecto. **No** se deben colocar en archivos `.env` versionados ni dentro de código de cliente. La ruta `integrations.status` informa únicamente si un placeholder está activo; nunca revela valores. Disponer de una clave o de una cuenta de servicio no activa por sí solo ninguna integración: se requiere además `NEXO_ENABLE_PAID_CONNECTORS=true`.
+
+## Costes y cuotas de conectores opcionales
+
+La importación CSV, la entrada manual y la comprobación web pública básica no requieren credenciales de Google ni realizan llamadas a sus servicios. La API de Google Sheets informa que el uso estándar no tiene coste adicional y aplica, entre otras, cuotas de 300 lecturas y 300 escrituras por minuto por proyecto; Google prevé cargos futuros para excesos de cuota durante 2026. [1]
+
+PageSpeed Insights puede consultarse con o sin clave; una clave es recomendable para consultas automatizadas frecuentes. Nexo mantiene el análisis público básico como alternativa cuando no se habilita este conector. [2]
+
+Google Places utiliza facturación por uso y requiere que el proyecto tenga la facturación habilitada; solicitar únicamente los campos necesarios reduce el consumo facturable. Por ello, este conector permanece desactivado de forma predeterminada y la aplicación muestra el plan y los límites antes de ejecutarlo. [3]
+
+## Referencias
+
+[1] [Límites y precios de Google Sheets API](https://developers.google.com/workspace/sheets/api/limits)
+
+[2] [Guía de inicio de PageSpeed Insights API](https://developers.google.com/speed/docs/insights/v5/get-started)
+
+[3] [Uso y facturación de Places API](https://developers.google.com/maps/documentation/places/web-service/usage-and-billing)
 
 ## Configuración administrada por la plataforma
 
@@ -23,7 +43,10 @@ Las variables se añaden desde el panel de secretos del proyecto. **No** se debe
 |---|---|---|
 | Autenticación | OAuth y cookies de sesión gestionadas. | Iniciar sesión desde la aplicación. |
 | Base de datos | Conexión y secreto de sesión gestionados. | No configurar ni exponer URL de base de datos. |
-| Google Places | Proxy autenticado de Maps del proyecto. | Definir límites de consumo antes de lanzar una prospección. |
+| CSV y entrada manual | No requieren credenciales ni llamadas a proveedores. | Importar exclusivamente datos que estés autorizado a usar. |
+| Google Places | Proxy autenticado de Maps del proyecto; conector opcional. | Configurar el acceso oficial, definir límites y establecer `NEXO_ENABLE_PAID_CONNECTORS=true` antes de lanzar una prospección. |
+| Google Sheets | Cuenta de servicio y hoja compartida como Editor; conector opcional. | Añadir las tres variables de Sheets y establecer `NEXO_ENABLE_PAID_CONNECTORS=true` si se desea entrega directa. |
+| Análisis web | Comprobación pública básica por defecto; PageSpeed Insights es opcional. | Añadir la clave de PageSpeed y establecer `NEXO_ENABLE_PAID_CONNECTORS=true` solo para métricas Lighthouse detalladas. |
 | Roles | La persona propietaria queda como administradora al acceder por primera vez. | Administrar cuentas desde la ruta restringida de Administración. |
 
 ## Límites de consumo y confirmación
@@ -34,7 +57,7 @@ Cada ejecución conserva su estado, eventos y los resultados ya procesados. Si e
 
 ## Exportación y contrato de datos
 
-La interfaz permite exportar a CSV sólo los prospectos seleccionados. El esquema se ha preparado para una posterior entrega a Google Sheets mediante `NEXO_GOOGLE_SHEETS_WEBHOOK_URL`. Cada fila mantiene un identificador `lead_id` derivado del negocio y contiene, entre otros, los siguientes campos:
+La interfaz permite exportar a CSV los prospectos seleccionados. Solo si se configuran las variables de Google Sheets **y** `NEXO_ENABLE_PAID_CONNECTORS=true`, también puede entregar filas aprobadas de forma auditable a la pestaña indicada. Cada fila mantiene un identificador `lead_id` derivado del negocio y contiene, entre otros, los siguientes campos:
 
 | Grupo | Campos incluidos |
 |---|---|
@@ -62,5 +85,8 @@ La validación no ejecuta consultas de proveedores externos ni genera cargos. Cu
 | Previsualización y presupuesto | `server/scannerPolicies.test.ts` | Aplica el tope efectivo de resultados y bloquea consumo diario fuera de presupuesto. |
 | Consumo real | `server/scannerPolicies.test.ts` | Indica detener el procesamiento si el proveedor excede las operaciones o el coste autorizados. |
 | Exportación CSV | `server/scannerPolicies.test.ts` | Escapa comillas, serializa estructuras y neutraliza celdas que una hoja de cálculo podría interpretar como fórmulas. |
+| Análisis web público | `server/websiteAnalyzer.test.ts` | Permite revisar solo destinos públicos y conserva la alternativa básica mientras PageSpeed permanezca como placeholder. |
+| Google Sheets opcional | `server/googleSheets.test.ts` | Formatea de forma segura las celdas estructuradas y mantiene la hoja inactiva sin el interruptor expreso. |
+| Borradores de cualificación | `server/templates.test.ts` | Sustituye únicamente variables conocidas y no inicia ninguna comunicación. |
 
 Las pruebas se ejecutan con `pnpm test`; la comprobación estática se ejecuta con `pnpm exec tsc --noEmit`.

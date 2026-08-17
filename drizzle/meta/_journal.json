@@ -22,6 +22,20 @@
       "when": 1786984565795,
       "tag": "0002_nifty_the_twelve",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1786993028138,
+      "tag": "0003_secret_madrox",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1786994117266,
+      "tag": "0004_friendly_radioactive_man",
+      "breakpoints": true
     }
   ]
 }

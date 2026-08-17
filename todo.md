@@ -43,3 +43,21 @@
 - [x] Añadir pruebas automatizadas para la planificación de prospecciones, límites de presupuesto, control de consumo y exportación CSV.
 - [x] Documentar los procedimientos críticos del scanner y su cobertura de prueba asociada.
 - [x] Confirmar que la documentación en español conserva la matriz de procedimientos críticos y pruebas asociadas.
+- [x] Implementar la entrega real y auditable de prospectos aprobados a Google Sheets mediante una integración autorizada.
+- [x] Implementar el análisis web con un proveedor externo autorizado, señales verificables y control de errores por prospecto.
+- [x] Crear, editar y aplicar plantillas de cualificación y contacto sin enviar comunicaciones automáticamente.
+- [x] Documentar las nuevas credenciales, permisos mínimos, límites y comportamiento de cada integración externa.
+- [x] Añadir pruebas automatizadas para los contratos de exportación, análisis web y plantillas.
+- [ ] Preparar la versión integrada para su envío al repositorio `juanxaviercasa/local-scanner` cuando el usuario lo solicite de forma explícita.
+- [x] Convertir la importación manual y CSV en la fuente predeterminada de negocios sin coste ni credenciales externas.
+- [x] Mantener Google Places, Google Sheets y PageSpeed como conectores opcionales y claramente identificados como tales.
+- [ ] Añadir proveedores alternativos autorizados y configuración explícita de la fuente de cada campaña.
+- [x] Documentar que no se realiza scraping de Google Maps ni se eluden sus controles de acceso.
+- [x] Corregir la serialización de valores estructurados en la exportación opcional a Google Sheets.
+- [x] Garantizar que la aplicación no requiere ni intenta usar APIs de pago en su operación predeterminada.
+- [x] Consolidar CSV, entrada manual, análisis público básico, puntuación, plantillas y exportación CSV como flujo completo sin coste.
+- [x] Mostrar los conectores de pago solo como placeholders desactivados, sin solicitar credenciales ni activar tráfico externo.
+- [x] Documentar el modo sin coste y el procedimiento opcional de activación futura de cada conector comercial.
+- [x] Bloquear explícitamente los conectores comerciales mientras el modo sin coste esté activo y mostrar su estado como placeholder desactivado.
+- [x] Restringir la exportación opcional a Google Sheets a prospectos cualificados y comunicar el criterio en la interfaz.
+- [x] Añadir una prueba automatizada que cubra el rechazo de exportaciones de prospectos no cualificados.
