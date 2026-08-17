@@ -102,3 +102,12 @@
 - [x] Añadir una prueba tRPC de `handoffs.dossier` que rechace un prospecto marcado como demostración antes de generar el expediente.
 - [x] Inventariar explícitamente las automatizaciones internas cubiertas y documentar por qué las restantes requieren datos reales o activación externa.
 - [x] Documentar en la configuración la cobertura automatizada de la exclusión de demostraciones en rutas de transición.
+- [x] Personalizar el expediente de auditoría con narrativa de oportunidad, alcance web recomendado y próximos pasos para el SaaS receptor.
+- [x] Añadir una guía textual accesible desde la navegación que explique el flujo completo de operación y transición.
+- [x] Implementar un recorrido guiado dentro de la interfaz con pasos, acciones y estado de progreso.
+- [x] Validar el expediente personalizado, la guía y el recorrido en escritorio y móvil con pruebas automatizadas y revisión visual.
+- [x] Añadir pruebas automatizadas para la guía y el recorrido, incluyendo acceso desde navegación y persistencia o reinicio local del progreso.
+- [x] Añadir una prueba automatizada que confirme el enlace de transición a la guía y el bloque visible del expediente 2.0.
+- [x] Añadir una prueba de navegación que verifique el acceso a la guía desde la barra privada del panel.
+- [x] Añadir una prueba de transición que confirme el enlace visible a la guía y la tarjeta del expediente de auditoría 2.0.
+- [x] Reejecutar la validación completa después de cubrir la navegación y transición de la orientación integrada.

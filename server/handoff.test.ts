@@ -17,6 +17,9 @@ describe("cola de transición", () => {
     const dossier = buildAuditDossier({ business: { name: "Ejemplo de validación", websiteStatus: "no_website" }, prospect: { id: 10, opportunityScore: 82, priority: "p1", scoreReasons: [], status: "contact_pending" }, eligibility: evaluateHandoffEligibility({ status: "contact_pending", opportunityScore: 82, nextActionLabel: "Validar expediente", nextActionAt: new Date("2026-09-10T12:00:00.000Z"), websiteStatus: "no_website" }, policy), analyses: [] });
     expect(dossier.externalDelivery.enabled).toBe(false);
     expect(dossier.purpose).toContain("revisión humana");
+    expect(dossier.version).toBe("2.0");
+    expect(dossier.auditBrief.recommendedEngagement.type).toBe("new_website");
+    expect(dossier.auditBrief.guardrails.join(" ")).toContain("contacto automático");
   });
 
   it("respeta una política operativa que relaja seguimiento o evidencia digital de forma explícita", () => {
