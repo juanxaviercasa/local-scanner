@@ -1,0 +1,21 @@
+# Project TODO
+
+- [x] Definir el sistema visual de Nexo Ops, incluidos identidad, tipografía, paleta, tokens y comportamiento responsive.
+- [x] Crear una landing pública en español con hero, propuesta de valor, características y llamada a la acción de acceso.
+- [x] Configurar autenticación Manus OAuth con inicio y cierre de sesión, persistencia de sesión y rutas privadas.
+- [x] Diseñar y aplicar el esquema de datos para perfiles, proyectos, miembros, tareas, archivos y actividad.
+- [x] Implementar contratos tRPC y operaciones seguras de creación, lectura, edición y eliminación para proyectos y tareas.
+- [x] Construir un DashboardLayout accesible con navegación lateral, resumen operativo, estados de carga y acciones rápidas.
+- [x] Implementar el módulo de proyectos con estados, fechas límite, vistas de listado, creación, edición y eliminación.
+- [x] Implementar el módulo de tareas por proyecto con prioridad, estado, asignación, búsqueda y filtros.
+- [x] Integrar subida, listado y descarga segura de archivos de proyecto mediante almacenamiento S3.
+- [x] Registrar y visualizar actividad cronológica de proyectos, tareas y archivos.
+- [x] Implementar el perfil de usuario con edición de nombre, avatar y preferencias básicas.
+- [x] Implementar el panel administrativo estrictamente protegido con gestión de usuarios y roles admin/user.
+- [x] Añadir placeholders de integraciones externas exclusivamente configurables mediante variables de entorno.
+- [x] Redactar en español la documentación de configuración, variables de entorno, seguridad y siguientes pasos.
+- [ ] Crear y ejecutar pruebas unitarias de los procedimientos críticos y de las restricciones de autorización.
+- [ ] Verificar la interfaz en escritorio y móvil, corregir errores de compilación y preparar el proyecto para pruebas bajo solicitud del usuario.
+- [x] Permitir la asignación y reasignación explícita de responsables en tareas desde backend y frontend.
+- [x] Usar el procedimiento protegido de descarga de archivos desde la interfaz, sin exponer enlaces directos desde el listado.
+- [x] Permitir que la persona propietaria incorpore miembros existentes a un proyecto para habilitar asignaciones colaborativas.
