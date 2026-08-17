@@ -167,6 +167,7 @@ export const businesses = mysqlTable("businesses", {
   socialProfiles: json("socialProfiles").$type<Record<string, string>>(),
   bookingUrl: varchar("bookingUrl", { length: 2048 }),
   whatsappUrl: varchar("whatsappUrl", { length: 2048 }),
+  isDemo: int("isDemo").default(0).notNull(),
   dataQualityScore: int("dataQualityScore").default(0).notNull(),
   sourceTimestamp: timestamp("sourceTimestamp").defaultNow().notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

@@ -108,5 +108,6 @@ La validación no ejecuta consultas de proveedores externos ni genera cargos. Cu
 | Borradores de cualificación | `server/templates.test.ts` | Sustituye únicamente variables conocidas y no inicia ninguna comunicación. |
 | Calibración CSV | `server/scoringCalibration.test.ts` | Calcula recomendaciones explicables desde resultados etiquetados y exige una muestra mínima. |
 | Seguimiento comercial | `server/prospectFollowup.test.ts` | Conserva próximas acciones, registra el cambio de estado y detecta el primer contacto. |
+| Protección de demostraciones | `server/demoGuard.test.ts`, `server/demoHandoff.router.test.ts` | Rechaza registros `isDemo` en exportaciones, cola de auditoría y expediente antes de que puedan entrar en un flujo comercial. |
 
 Las pruebas se ejecutan con `pnpm test`; la comprobación estática se ejecuta con `pnpm exec tsc --noEmit`.

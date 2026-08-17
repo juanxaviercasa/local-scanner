@@ -24,4 +24,10 @@ describe("cola de transición", () => {
     expect(eligibility.eligible).toBe(true);
     expect(eligibility.criteria.minimumOpportunityScore).toBe(50);
   });
+
+  it("bloquea las demostraciones incluso si el resto de los criterios comerciales se cumple", () => {
+    const eligibility = evaluateHandoffEligibility({ status: "contact_pending", opportunityScore: 92, nextActionLabel: "Revisar", nextActionAt: new Date("2026-09-10T12:00:00.000Z"), websiteStatus: "no_website", isDemo: true }, policy);
+    expect(eligibility.eligible).toBe(false);
+    expect(eligibility.reasons.join(" ")).toContain("demostración");
+  });
 });

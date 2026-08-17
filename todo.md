@@ -93,3 +93,12 @@
 - [x] Validar con un escenario sintético apto la cola y el expediente de auditoría sin reseñas ni calificaciones inventadas.
 - [x] Verificar mediante el contrato de expediente que la aprobación mantiene la entrega externa desactivada hasta una activación explícita.
 - [ ] Validar la calibración definitiva del Opportunity Score con un CSV de cierres reales autorizado por el operador antes de aplicar pesos de producción.
+- [x] Revisar de forma autónoma las rutas, contratos y configuraciones que dependan de datos reales o credenciales, dejando controles seguros y estados claros.
+- [x] Completar cualquier automatización interna verificable sin activar envíos, cobros ni conectores externos.
+- [x] Reforzar pruebas y documentación de los límites que requieren una activación posterior del operador.
+- [x] Marcar los negocios de demostración de forma persistente y excluirlos de exportaciones, entrega a auditoría y cualquier transición comercial.
+- [x] Añadir cobertura automatizada que pruebe el bloqueo de demostraciones en la cola y expediente de auditoría.
+- [x] Añadir una prueba tRPC de `handoffs.queue` que rechace un prospecto marcado como demostración.
+- [x] Añadir una prueba tRPC de `handoffs.dossier` que rechace un prospecto marcado como demostración antes de generar el expediente.
+- [x] Inventariar explícitamente las automatizaciones internas cubiertas y documentar por qué las restantes requieren datos reales o activación externa.
+- [x] Documentar en la configuración la cobertura automatizada de la exclusión de demostraciones en rutas de transición.

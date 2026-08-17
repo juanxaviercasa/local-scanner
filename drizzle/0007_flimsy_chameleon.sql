@@ -1,0 +1,1 @@
+ALTER TABLE `businesses` ADD `isDemo` int DEFAULT 0 NOT NULL;

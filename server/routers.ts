@@ -103,6 +103,7 @@ const importRecordInput = z.object({
   website: z.string().trim().url().max(1024).nullable().optional(),
   rating: z.number().min(0).max(5).nullable().optional(),
   reviewCount: z.number().int().min(0).max(1000000).nullable().optional(),
+  isDemo: z.boolean().optional(),
 });
 
 const importInput = searchInput.extend({
@@ -145,7 +146,13 @@ function asHandoffPolicy(policy: { minimumOpportunityScore: number; requireNextA
 }
 
 function handoffEligibilityFromProspect(item: Awaited<ReturnType<typeof listProspects>>[number], policy: ReturnType<typeof asHandoffPolicy>) {
-  return evaluateHandoffEligibility({ status: item.prospect.status, opportunityScore: item.prospect.opportunityScore, nextActionLabel: item.prospect.nextActionLabel, nextActionAt: item.prospect.nextActionAt, websiteStatus: item.business.websiteStatus, websiteQuality: item.business.websiteQuality }, policy);
+  return evaluateHandoffEligibility({ status: item.prospect.status, opportunityScore: item.prospect.opportunityScore, nextActionLabel: item.prospect.nextActionLabel, nextActionAt: item.prospect.nextActionAt, websiteStatus: item.business.websiteStatus, websiteQuality: item.business.websiteQuality, isDemo: Boolean(item.business.isDemo) }, policy);
+}
+
+export function assertNoDemoProspects(items: Array<{ business: { isDemo: number } }>) {
+  if (items.some(item => Boolean(item.business.isDemo))) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Los registros de demostración no se pueden exportar, transferir a auditoría ni usar en operaciones comerciales." });
+  }
 }
 
 export function renderTemplate(value: string | null, replacements: Record<string, string>) {
@@ -300,7 +307,7 @@ async function importBusinesses(ownerId: number, input: z.infer<typeof importInp
         name: record.name, category: record.category || input.primaryCategory, categories: record.category ? [record.category] : [input.primaryCategory],
         address: record.address ?? null, city: record.city || input.city, region: record.region ?? null, country: record.country || input.country,
         phone: record.phone ?? null, website: record.website ?? null, domain: domainFromUrl(record.website ?? undefined), rating: record.rating ?? null, reviewCount: record.reviewCount ?? null,
-        websiteStatus, dataQualityScore: dataQualityOf(record),
+        isDemo: record.isDemo ? 1 : 0, websiteStatus, dataQualityScore: dataQualityOf(record),
       });
       const evaluated = scoreBusiness({ rating: record.rating, reviewCount: record.reviewCount, websiteStatus, websiteQuality: "not_analyzed", hasPhone: Boolean(record.phone), hasBooking: false, hasWhatsapp: false, commercialPotential: "medium" }, weights, thresholds);
       const status = evaluated.opportunityScore >= input.minOpportunityScore ? "qualified" : "rejected";
@@ -443,11 +450,14 @@ export const appRouter = router({
     exportRows: protectedProcedure.input(z.object({ prospectIds: z.array(z.number().int().positive()).min(1).max(500) })).query(async ({ ctx, input }) => {
       const all = await listProspects(ctx.user.id, { limit: 5000 });
       const selected = all.filter(item => input.prospectIds.includes(item.prospect.id));
+      assertNoDemoProspects(selected);
       return selected.map(exportRowFromProspect);
     }),
     exportCsv: protectedProcedure.input(z.object({ prospectIds: z.array(z.number().int().positive()).min(1).max(500) })).mutation(async ({ ctx, input }) => {
       const all = await listProspects(ctx.user.id, { limit: 5000 });
-      const rows = all.filter(item => input.prospectIds.includes(item.prospect.id)).map(exportRowFromProspect);
+      const selected = all.filter(item => input.prospectIds.includes(item.prospect.id));
+      assertNoDemoProspects(selected);
+      const rows = selected.map(exportRowFromProspect);
       return { filename: `nexo-prospectos-${new Date().toISOString().slice(0, 10)}.csv`, csv: buildCsvDocument(rows) };
     }),
     exportGoogleSheets: protectedProcedure.input(z.object({ prospectIds: z.array(z.number().int().positive()).min(1).max(500) })).mutation(async ({ ctx, input }) => {
@@ -457,6 +467,7 @@ export const appRouter = router({
       const all = await listProspects(ctx.user.id, { limit: 5000 });
       const selected = all.filter(item => input.prospectIds.includes(item.prospect.id));
       if (selected.length !== input.prospectIds.length) throw new TRPCError({ code: "NOT_FOUND", message: "Uno o más prospectos no están disponibles para exportar." });
+      assertNoDemoProspects(selected);
       assertGoogleSheetsEligibility(selected.map(item => item.prospect.status));
       try {
         const output = await appendRowsToGoogleSheet(selected.map(exportRowFromProspect));
@@ -507,6 +518,7 @@ export const appRouter = router({
     queue: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), note: z.string().trim().max(2000).nullable().optional() })).mutation(async ({ ctx, input }) => {
       const [item, policy] = await Promise.all([getProspect(ctx.user.id, input.prospectId), getOrCreateHandoffPolicy(ctx.user.id)]);
       if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
+      assertNoDemoProspects([item]);
       const eligibility = handoffEligibilityFromProspect(item, asHandoffPolicy(policy));
       if (!eligibility.eligible) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Aún no se puede pasar a auditoría: ${eligibility.reasons.join(" ")}` });
       const handoff = await upsertProspectHandoff({ ownerId: ctx.user.id, prospectId: input.prospectId, destinationLabel: policy.destinationLabel, eligibilitySnapshot: eligibility.criteria, note: input.note ?? null });
@@ -514,6 +526,9 @@ export const appRouter = router({
       return handoff;
     }),
     approve: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), note: z.string().trim().max(2000).nullable().optional() })).mutation(async ({ ctx, input }) => {
+      const item = await getProspect(ctx.user.id, input.prospectId);
+      if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
+      assertNoDemoProspects([item]);
       const handoff = await updateProspectHandoff(ctx.user.id, input.prospectId, { status: "approved", approvedAt: new Date(), note: input.note ?? null });
       if (!handoff) throw new TRPCError({ code: "NOT_FOUND", message: "Primero incorpora esta oportunidad a la cola de auditoría." });
       await createProspectActivity({ ownerId: ctx.user.id, prospectId: input.prospectId, action: "handoff_approved", note: "La oportunidad fue aprobada para preparar el expediente de auditoría." });
@@ -522,6 +537,7 @@ export const appRouter = router({
     dossier: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), markExported: z.boolean().default(false) })).mutation(async ({ ctx, input }) => {
       const [item, policy, analyses, handoff] = await Promise.all([getProspect(ctx.user.id, input.prospectId), getOrCreateHandoffPolicy(ctx.user.id), listWebsiteAnalyses(ctx.user.id, input.prospectId), getProspectHandoff(ctx.user.id, input.prospectId)]);
       if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
+      assertNoDemoProspects([item]);
       if (!handoff || !["approved", "package_exported", "delivered"].includes(handoff.status)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Aprueba primero la oportunidad en la cola de auditoría." });
       const eligibility = handoffEligibilityFromProspect(item, asHandoffPolicy(policy));
       const dossier = buildAuditDossier({ business: item.business, prospect: item.prospect, eligibility, analyses });
@@ -533,6 +549,9 @@ export const appRouter = router({
     }),
     markDelivered: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), externalReference: z.string().trim().min(2).max(512), note: z.string().trim().max(2000).nullable().optional() })).mutation(async ({ ctx, input }) => {
       if (!ENV.handoffConnectorEnabled || !ENV.handoffWebhookUrl) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "El SaaS externo permanece como placeholder inactivo. Exporta el expediente y registra la entrega manual solo después de configurar y habilitar el conector." });
+      const item = await getProspect(ctx.user.id, input.prospectId);
+      if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
+      assertNoDemoProspects([item]);
       const handoff = await updateProspectHandoff(ctx.user.id, input.prospectId, { status: "delivered", deliveredAt: new Date(), externalReference: input.externalReference, note: input.note ?? null });
       if (!handoff) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró la oportunidad en la cola de auditoría." });
       await createProspectActivity({ ownerId: ctx.user.id, prospectId: input.prospectId, action: "handoff_delivered", note: "Se registró la entrega al SaaS externo configurado." });

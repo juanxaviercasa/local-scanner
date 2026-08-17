@@ -517,7 +517,7 @@ export async function upsertBusinessFromProvider(data: {
   ownerId: number; source: string; externalId: string; deduplicationKey: string; name: string; category?: string | null; categories?: string[] | null;
   address?: string | null; city?: string | null; region?: string | null; country?: string | null; latitude?: number | null; longitude?: number | null;
   phone?: string | null; website?: string | null; domain?: string | null; googleMapsUrl?: string | null; rating?: number | null; reviewCount?: number | null;
-  businessStatus?: string | null; websiteStatus: "no_website" | "website_found" | "website_unreachable" | "website_unknown"; dataQualityScore: number;
+  businessStatus?: string | null; isDemo?: 0 | 1; websiteStatus: "no_website" | "website_found" | "website_unreachable" | "website_unknown"; dataQualityScore: number;
 }) {
   const db = await getDb();
   if (!db) throw new Error("La base de datos no está disponible.");

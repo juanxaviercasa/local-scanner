@@ -13,12 +13,14 @@ export type HandoffCandidate = {
   nextActionAt?: Date | null;
   websiteStatus: "no_website" | "website_found" | "website_unreachable" | "website_unknown";
   websiteQuality?: "excellent" | "good" | "average" | "weak" | "very_weak" | "broken" | "not_analyzed" | null;
+  isDemo?: boolean;
 };
 
 const eligibleStatuses: CommercialProspectStatus[] = ["qualified", "analysis_pending", "analyzed", "contact_pending", "contacted", "exported"];
 
 export function evaluateHandoffEligibility(candidate: HandoffCandidate, policy: HandoffPolicyInput) {
   const reasons: string[] = [];
+  if (candidate.isDemo) reasons.push("Los datos de demostración están bloqueados para transición comercial y entrega externa.");
   if (candidate.opportunityScore < policy.minimumOpportunityScore) reasons.push(`El Opportunity Score es ${candidate.opportunityScore}; el mínimo configurado es ${policy.minimumOpportunityScore}.`);
   if (!eligibleStatuses.includes(candidate.status)) reasons.push("El prospecto aún no se encuentra en un estado comercial apto para auditoría.");
   if (policy.requireNextAction && (!candidate.nextActionLabel || !candidate.nextActionAt)) reasons.push("Falta registrar una próxima acción comercial con fecha.");

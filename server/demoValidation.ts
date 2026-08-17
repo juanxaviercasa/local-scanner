@@ -21,6 +21,7 @@ export function getValidationDemoImport() {
       website: null,
       rating: null,
       reviewCount: null,
+      isDemo: true,
     }],
   };
 }
