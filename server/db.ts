@@ -402,7 +402,9 @@ export async function listSearchProfiles(ownerId: number) {
   return db.select().from(searchProfiles).where(eq(searchProfiles.ownerId, ownerId)).orderBy(desc(searchProfiles.updatedAt));
 }
 
-export async function createSearchProfile(ownerId: number, data: {
+export type AuthorizedProfileSource = "google_maps" | "csv_import" | "manual_entry";
+
+export type SearchProfileInput = {
   name: string;
   country: string;
   city: string;
@@ -417,14 +419,21 @@ export async function createSearchProfile(ownerId: number, data: {
   minReviewCount: number;
   minOpportunityScore: number;
   websiteMode: "no_website" | "with_website" | "both";
-}) {
-  const db = await getDb();
-  if (!db) throw new Error("La base de datos no está disponible.");
-  const result = await db.insert(searchProfiles).values({
+  provider: AuthorizedProfileSource;
+};
+
+export function buildSearchProfileValues(ownerId: number, data: SearchProfileInput) {
+  return {
     ...data,
     ownerId,
     minRating: data.minRating === null || data.minRating === undefined ? null : String(data.minRating),
-  });
+  };
+}
+
+export async function createSearchProfile(ownerId: number, data: SearchProfileInput) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const result = await db.insert(searchProfiles).values(buildSearchProfileValues(ownerId, data));
   return (await db.select().from(searchProfiles).where(eq(searchProfiles.id, Number(result[0].insertId))).limit(1))[0]!;
 }
 

@@ -53,6 +53,7 @@ const websiteStatusSchema = z.enum(["no_website", "website_found", "website_unre
 const prioritySchema = z.enum(["p0", "p1", "p2", "p3", "ignore"]);
 const prospectStatusSchema = z.enum(["new", "qualified", "rejected", "exported", "analysis_pending", "analyzed", "demo_pending", "contact_pending", "contacted", "converted", "lost"]);
 const runStatusSchema = z.enum(["queued", "running", "paused", "completed", "partial", "failed", "cancelled"]);
+export const authorizedSourceSchema = z.enum(["csv_import", "manual_entry", "google_maps"]);
 
 const searchInput = z.object({
   country: z.string().trim().min(2).max(80),
@@ -336,7 +337,7 @@ export const appRouter = router({
   }),
   searchProfiles: router({
     list: protectedProcedure.query(({ ctx }) => listSearchProfiles(ctx.user.id)),
-    create: protectedProcedure.input(searchInput.extend({ name: z.string().trim().min(2).max(120) })).mutation(({ ctx, input }) => {
+    create: protectedProcedure.input(searchInput.extend({ name: z.string().trim().min(2).max(120), provider: authorizedSourceSchema })).mutation(({ ctx, input }) => {
       const { name, ...profile } = input;
       return createSearchProfile(ctx.user.id, { name, ...profile });
     }),

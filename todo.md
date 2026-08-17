@@ -48,10 +48,15 @@
 - [x] Crear, editar y aplicar plantillas de cualificación y contacto sin enviar comunicaciones automáticamente.
 - [x] Documentar las nuevas credenciales, permisos mínimos, límites y comportamiento de cada integración externa.
 - [x] Añadir pruebas automatizadas para los contratos de exportación, análisis web y plantillas.
-- [ ] Preparar la versión integrada para su envío al repositorio `juanxaviercasa/local-scanner` cuando el usuario lo solicite de forma explícita.
+- [x] Preparar la versión integrada para su envío al repositorio `juanxaviercasa/local-scanner` cuando el usuario lo solicite de forma explícita.
 - [x] Convertir la importación manual y CSV en la fuente predeterminada de negocios sin coste ni credenciales externas.
 - [x] Mantener Google Places, Google Sheets y PageSpeed como conectores opcionales y claramente identificados como tales.
-- [ ] Añadir proveedores alternativos autorizados y configuración explícita de la fuente de cada campaña.
+- [x] Añadir proveedores alternativos autorizados y configuración explícita de la fuente de cada campaña.
+- [x] Persistir la fuente autorizada seleccionada en los perfiles de búsqueda y devolverla desde el contrato de perfiles.
+- [x] Permitir guardar y recuperar desde la interfaz un perfil de búsqueda con fuente CSV, manual o Google oficial.
+- [x] Añadir una prueba automatizada que cubra la fuente autorizada de un perfil persistente.
+- [x] Añadir una prueba de ida y vuelta del contrato de perfiles que confirme que la fuente seleccionada se guarda y se devuelve.
+- [x] Conectar el doble de prueba de perfiles para verificar que el listado devuelve exactamente la fuente creada en el mismo flujo.
 - [x] Documentar que no se realiza scraping de Google Maps ni se eluden sus controles de acceso.
 - [x] Corregir la serialización de valores estructurados en la exportación opcional a Google Sheets.
 - [x] Garantizar que la aplicación no requiere ni intenta usar APIs de pago en su operación predeterminada.
