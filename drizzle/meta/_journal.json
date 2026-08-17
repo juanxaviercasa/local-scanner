@@ -43,6 +43,13 @@
       "when": 1787001707452,
       "tag": "0005_tense_kate_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1787003645821,
+      "tag": "0006_legal_paper_doll",
+      "breakpoints": true
     }
   ]
 }

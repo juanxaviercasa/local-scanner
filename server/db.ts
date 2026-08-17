@@ -1,10 +1,11 @@
-import { and, desc, eq, inArray, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   activities,
   budgetSettings,
   businesses,
   categoryProfiles,
+  handoffPolicies,
   InsertUser,
   prospectingRuns,
   projectFiles,
@@ -12,6 +13,7 @@ import {
   projectMembers,
   prospectActivities,
   prospectExports,
+  prospectHandoffs,
   rawSearchResults,
   runEvents,
   runProspects,
@@ -552,16 +554,35 @@ export async function createRunProspect(data: {
   return (await db.select().from(runProspects).where(eq(runProspects.id, Number(result[0].insertId))).limit(1))[0]!;
 }
 
-export async function listProspects(ownerId: number, filters?: { runId?: number; priority?: "p0" | "p1" | "p2" | "p3" | "ignore"; websiteStatus?: "no_website" | "website_found" | "website_unreachable" | "website_unknown"; minimumScore?: number; query?: string; limit?: number }) {
+export type ProspectListFilters = { runId?: number; priority?: "p0" | "p1" | "p2" | "p3" | "ignore"; status?: "new" | "qualified" | "rejected" | "exported" | "analysis_pending" | "analyzed" | "demo_pending" | "contact_pending" | "contacted" | "converted" | "lost"; websiteStatus?: "no_website" | "website_found" | "website_unreachable" | "website_unknown"; dueState?: "overdue" | "today" | "upcoming" | "none"; minimumScore?: number; query?: string; limit?: number };
+
+export async function listProspects(ownerId: number, filters?: ProspectListFilters) {
   const db = await getDb();
   if (!db) return [];
   const predicates = [eq(businesses.ownerId, ownerId)];
   if (filters?.runId) predicates.push(eq(runProspects.runId, filters.runId));
   if (filters?.priority) predicates.push(eq(runProspects.priority, filters.priority));
+  if (filters?.status) predicates.push(eq(runProspects.status, filters.status));
   if (filters?.websiteStatus) predicates.push(eq(businesses.websiteStatus, filters.websiteStatus));
   if (filters?.minimumScore !== undefined) predicates.push(sql`${runProspects.opportunityScore} >= ${filters.minimumScore}`);
   if (filters?.query) predicates.push(or(like(businesses.name, `%${filters.query.trim()}%`), like(businesses.city, `%${filters.query.trim()}%`))!);
+  const now = new Date();
+  const endOfToday = new Date(now); endOfToday.setHours(23, 59, 59, 999);
+  const upcomingEnd = new Date(now.getTime() + 72 * 60 * 60 * 1000);
+  if (filters?.dueState === "overdue") predicates.push(lt(runProspects.nextActionAt, now));
+  if (filters?.dueState === "today") predicates.push(and(gte(runProspects.nextActionAt, now), lte(runProspects.nextActionAt, endOfToday))!);
+  if (filters?.dueState === "upcoming") predicates.push(and(gte(runProspects.nextActionAt, now), lte(runProspects.nextActionAt, upcomingEnd))!);
+  if (filters?.dueState === "none") predicates.push(isNull(runProspects.nextActionAt));
   return db.select({ prospect: runProspects, business: businesses, run: prospectingRuns }).from(runProspects).innerJoin(businesses, eq(runProspects.businessId, businesses.id)).innerJoin(prospectingRuns, eq(runProspects.runId, prospectingRuns.id)).where(and(...predicates)).orderBy(desc(runProspects.opportunityScore)).limit(filters?.limit ?? 200);
+}
+
+export async function getProspectReminders(ownerId: number) {
+  const [overdue, today, upcoming] = await Promise.all([
+    listProspects(ownerId, { dueState: "overdue", limit: 100 }),
+    listProspects(ownerId, { dueState: "today", limit: 100 }),
+    listProspects(ownerId, { dueState: "upcoming", limit: 100 }),
+  ]);
+  return { overdue, today, upcoming };
 }
 
 export async function getProspect(ownerId: number, prospectId: number) {
@@ -591,6 +612,58 @@ export async function listProspectActivities(ownerId: number, prospectId: number
   const db = await getDb();
   if (!db) return [];
   return db.select().from(prospectActivities).where(and(eq(prospectActivities.ownerId, ownerId), eq(prospectActivities.prospectId, prospectId))).orderBy(desc(prospectActivities.createdAt));
+}
+
+export async function getOrCreateHandoffPolicy(ownerId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  const current = (await db.select().from(handoffPolicies).where(eq(handoffPolicies.ownerId, ownerId)).limit(1))[0];
+  if (current) return current;
+  const result = await db.insert(handoffPolicies).values({ ownerId });
+  return (await db.select().from(handoffPolicies).where(eq(handoffPolicies.id, Number(result[0].insertId))).limit(1))[0]!;
+}
+
+export async function updateHandoffPolicy(ownerId: number, data: Partial<{ minimumOpportunityScore: number; requireNextAction: number; requireDigitalEvidence: number; destinationLabel: string }>) {
+  const current = await getOrCreateHandoffPolicy(ownerId);
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  await db.update(handoffPolicies).set(data).where(eq(handoffPolicies.id, current.id));
+  return getOrCreateHandoffPolicy(ownerId);
+}
+
+export async function getProspectHandoff(ownerId: number, prospectId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return (await db.select().from(prospectHandoffs).where(and(eq(prospectHandoffs.ownerId, ownerId), eq(prospectHandoffs.prospectId, prospectId))).limit(1))[0];
+}
+
+export async function upsertProspectHandoff(data: { ownerId: number; prospectId: number; destinationLabel: string; eligibilitySnapshot: Record<string, unknown>; note?: string | null }) {
+  const existing = await getProspectHandoff(data.ownerId, data.prospectId);
+  const db = await getDb();
+  if (!db) throw new Error("La base de datos no está disponible.");
+  if (existing) {
+    await db.update(prospectHandoffs).set({ destinationLabel: data.destinationLabel, eligibilitySnapshot: data.eligibilitySnapshot, note: data.note ?? existing.note }).where(eq(prospectHandoffs.id, existing.id));
+    return getProspectHandoff(data.ownerId, data.prospectId);
+  }
+  const result = await db.insert(prospectHandoffs).values(data);
+  return (await db.select().from(prospectHandoffs).where(eq(prospectHandoffs.id, Number(result[0].insertId))).limit(1))[0]!;
+}
+
+export async function updateProspectHandoff(ownerId: number, prospectId: number, data: Partial<{ status: "ready_for_review" | "approved" | "package_exported" | "delivered" | "returned"; approvedAt: Date | null; packageExportedAt: Date | null; deliveredAt: Date | null; externalReference: string | null; note: string | null; eligibilitySnapshot: Record<string, unknown> }>) {
+  const current = await getProspectHandoff(ownerId, prospectId);
+  if (!current) return undefined;
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.update(prospectHandoffs).set(data).where(eq(prospectHandoffs.id, current.id));
+  return getProspectHandoff(ownerId, prospectId);
+}
+
+export async function listProspectHandoffs(ownerId: number, status?: "ready_for_review" | "approved" | "package_exported" | "delivered" | "returned") {
+  const db = await getDb();
+  if (!db) return [];
+  const predicates = [eq(prospectHandoffs.ownerId, ownerId)];
+  if (status) predicates.push(eq(prospectHandoffs.status, status));
+  return db.select({ handoff: prospectHandoffs, prospect: runProspects, business: businesses, run: prospectingRuns }).from(prospectHandoffs).innerJoin(runProspects, eq(prospectHandoffs.prospectId, runProspects.id)).innerJoin(businesses, eq(runProspects.businessId, businesses.id)).innerJoin(prospectingRuns, eq(runProspects.runId, prospectingRuns.id)).where(and(...predicates)).orderBy(desc(prospectHandoffs.updatedAt));
 }
 
 export async function updateAnalyzedProspect(ownerId: number, prospectId: number, data: {

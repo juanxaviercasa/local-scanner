@@ -82,3 +82,14 @@
 - [x] Bloquear explícitamente los conectores comerciales mientras el modo sin coste esté activo y mostrar su estado como placeholder desactivado.
 - [x] Restringir la exportación opcional a Google Sheets a prospectos cualificados y comunicar el criterio en la interfaz.
 - [x] Añadir una prueba automatizada que cubra el rechazo de exportaciones de prospectos no cualificados.
+- [x] Añadir una plantilla CSV descargable y validación previa para importar cierres reales autorizados en la calibración del Opportunity Score.
+- [x] Implementar recordatorios internos de próximas acciones vencidas y próximas a vencer sin enviar comunicaciones externas por defecto.
+- [x] Añadir filtros de cola por estado comercial, preparación de transición y fecha de próxima acción.
+- [x] Definir criterios configurables de aptitud para pasar un prospecto a la siguiente fase de auditoría y creación o mejora web.
+- [x] Implementar una cola de transición con estados, controles de aprobación y un expediente de auditoría exportable por oportunidad.
+- [x] Mantener el SaaS externo como conector placeholder inactivo, preparado para entrega mediante configuración posterior sin modificar el código.
+- [x] Documentar y validar con demostración los flujos de calibración, recordatorios, filtros y transición comercial.
+- [x] Añadir controles visibles para configurar los requisitos de próxima acción y evidencia digital de la política de transición.
+- [x] Validar con un escenario sintético apto la cola y el expediente de auditoría sin reseñas ni calificaciones inventadas.
+- [x] Verificar mediante el contrato de expediente que la aprobación mantiene la entrega externa desactivada hasta una activación explícita.
+- [ ] Validar la calibración definitiva del Opportunity Score con un CSV de cierres reales autorizado por el operador antes de aplicar pesos de producción.

@@ -261,6 +261,34 @@ export const prospectActivities = mysqlTable("prospectActivities", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, table => [index("prospect_activities_prospect_created_idx").on(table.prospectId, table.createdAt), index("prospect_activities_owner_idx").on(table.ownerId, table.createdAt)]);
 
+/** Política configurable para decidir qué oportunidades pasan a auditoría o creación web. */
+export const handoffPolicies = mysqlTable("handoffPolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull().unique(),
+  minimumOpportunityScore: int("minimumOpportunityScore").default(70).notNull(),
+  requireNextAction: int("requireNextAction").default(1).notNull(),
+  requireDigitalEvidence: int("requireDigitalEvidence").default(1).notNull(),
+  destinationLabel: varchar("destinationLabel", { length: 160 }).default("SaaS de auditoría web").notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+/** Cola interna de oportunidades aprobadas para la siguiente fase de auditoría. */
+export const prospectHandoffs = mysqlTable("prospectHandoffs", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId").notNull(),
+  prospectId: int("prospectId").notNull().unique(),
+  status: mysqlEnum("status", ["ready_for_review", "approved", "package_exported", "delivered", "returned"]).default("ready_for_review").notNull(),
+  destinationLabel: varchar("destinationLabel", { length: 160 }).notNull(),
+  eligibilitySnapshot: json("eligibilitySnapshot").$type<Record<string, unknown>>().notNull(),
+  approvedAt: timestamp("approvedAt"),
+  packageExportedAt: timestamp("packageExportedAt"),
+  deliveredAt: timestamp("deliveredAt"),
+  externalReference: varchar("externalReference", { length: 512 }),
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [index("prospect_handoffs_owner_status_idx").on(table.ownerId, table.status), index("prospect_handoffs_prospect_idx").on(table.prospectId)]);
+
 /** Historial de análisis técnico sobre un sitio público indicado por el propio negocio. */
 export const websiteAnalyses = mysqlTable("websiteAnalyses", {
   id: int("id").autoincrement().primaryKey(),

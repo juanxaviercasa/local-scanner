@@ -12,4 +12,6 @@ export const ENV = {
   googleSheetsTab: process.env.NEXO_GOOGLE_SHEETS_TAB ?? "Prospectos",
   googlePageSpeedApiKey: process.env.NEXO_GOOGLE_PAGESPEED_API_KEY ?? "",
   paidConnectorsEnabled: process.env.NEXO_ENABLE_PAID_CONNECTORS === "true",
+  handoffConnectorEnabled: process.env.NEXO_ENABLE_HANDOFF_CONNECTOR === "true",
+  handoffWebhookUrl: process.env.NEXO_HANDOFF_WEBHOOK_URL ?? "",
 };

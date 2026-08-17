@@ -18,6 +18,8 @@
 | `NEXO_GOOGLE_SHEETS_SPREADSHEET_ID` | No | Identificador de la hoja de cálculo destino. La cuenta de servicio debe tener acceso de Editor. | `1EjemploHoja...` |
 | `NEXO_GOOGLE_SHEETS_TAB` | No | Nombre de la pestaña destino; si se omite, se utiliza `Prospectos`. | `Prospectos` |
 | `NEXO_GOOGLE_PAGESPEED_API_KEY` | No | Clave de PageSpeed Insights. Añade métricas Lighthouse al análisis de sitio; sin ella se mantiene una comprobación pública básica. | `completar-como-secreto` |
+| `NEXO_HANDOFF_WEBHOOK_URL` | No | URL autorizada del SaaS externo que recibirá expedientes de auditoría. Por ahora el producto la trata como configuración de placeholder y no realiza envíos automáticos. | `https://tu-saas.example/webhooks/nexo` |
+| `NEXO_ENABLE_HANDOFF_CONNECTOR` | No | Interruptor explícito de la futura entrega externa de expedientes. Debe ser exactamente `true` junto con la URL de entrega. | `true` |
 
 Las variables se añaden desde el panel de secretos del proyecto. **No** se deben colocar en archivos `.env` versionados ni dentro de código de cliente. La ruta `integrations.status` informa únicamente si un placeholder está activo; nunca revela valores. Disponer de una clave o de una cuenta de servicio no activa por sí solo ninguna integración: se requiere además `NEXO_ENABLE_PAID_CONNECTORS=true`.
 
@@ -82,6 +84,12 @@ El archivo se interpreta en el navegador y solo se envían al backend de la apli
 ### Seguimiento comercial interno
 
 Cada prospecto puede avanzar entre los estados de cualificación, demo, contacto, conversión o descarte ya disponibles. La ficha permite registrar una nota comercial, una próxima acción con fecha y hora, y las notas internas persistentes. Cada cambio comercial crea una entrada de bitácora con el estado anterior y posterior, la acción programada y la fecha de registro. Cuando el estado cambia por primera vez a `Contactado`, se conserva también la fecha del contacto. Estas operaciones no envían mensajes ni modifican datos procedentes de la fuente.
+
+### Transición a auditoría y SaaS posterior
+
+La ruta **Transición a auditoría** implementa la siguiente fase prevista del producto: filtra oportunidades por Opportunity Score, estado comercial, próxima acción y evidencia digital; permite preparar una cola; requiere aprobar el expediente; y descarga un JSON de auditoría para la entrega manual al SaaS que crea o mejora el sitio web. El umbral, el destino y los requisitos de próxima acción o evidencia digital son configurables por la persona operadora.
+
+El conector externo se mantiene como **placeholder inactivo** incluso si existe una URL. Solo puede considerarse activo al configurar `NEXO_HANDOFF_WEBHOOK_URL` y `NEXO_ENABLE_HANDOFF_CONNECTOR=true`; hasta entonces no se transmite información a terceros. El detalle operativo y la evidencia de validación se encuentran en `OPERACION_TRANSICION.md`.
 
 ## Validación automatizada realizada
 

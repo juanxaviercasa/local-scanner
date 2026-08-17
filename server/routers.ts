@@ -19,13 +19,17 @@ import {
   deleteQualificationTemplate,
   getOrCreateBudgetSettings,
   getOrCreateDefaultScoringProfile,
+  getOrCreateHandoffPolicy,
   getOrCreateQualificationTemplates,
   getProspect,
+  getProspectHandoff,
+  getProspectReminders,
   getProspectingRun,
   getScannerDashboard,
   getUsageSummary,
   listProspectExports,
   listProspectActivities,
+  listProspectHandoffs,
   listProspectingRuns,
   listProspects,
   listRunEvents,
@@ -36,6 +40,7 @@ import {
   recordProspectExport,
   updateAnalyzedProspect,
   updateBudgetSettings,
+  updateHandoffPolicy,
   updateBusinessWebsiteAnalysis,
   updateQualificationTemplate,
   updateRunProspect,
@@ -43,6 +48,8 @@ import {
   updateUserProfile,
   updateUserRole,
   updateProspectingRun,
+  updateProspectHandoff,
+  upsertProspectHandoff,
   upsertBusinessFromProvider,
 } from "./db";
 import { appendRowsToGoogleSheet, isGoogleSheetsConfigured } from "./googleSheets";
@@ -53,10 +60,13 @@ import { calibrateScoringWeights } from "./scoringCalibration";
 import { buildProspectFollowup } from "./prospectFollowup";
 import { analyzePublicWebsite, isPageSpeedConfigured } from "./websiteAnalyzer";
 import { createValidationDemo } from "./demoValidation";
+import { buildAuditDossier, evaluateHandoffEligibility } from "./handoff";
 
 const websiteStatusSchema = z.enum(["no_website", "website_found", "website_unreachable", "website_unknown"]);
 const prioritySchema = z.enum(["p0", "p1", "p2", "p3", "ignore"]);
 const prospectStatusSchema = z.enum(["new", "qualified", "rejected", "exported", "analysis_pending", "analyzed", "demo_pending", "contact_pending", "contacted", "converted", "lost"]);
+const handoffStatusSchema = z.enum(["ready_for_review", "approved", "package_exported", "delivered", "returned"]);
+const dueStateSchema = z.enum(["overdue", "today", "upcoming", "none"]);
 const runStatusSchema = z.enum(["queued", "running", "paused", "completed", "partial", "failed", "cancelled"]);
 export const authorizedSourceSchema = z.enum(["csv_import", "manual_entry", "google_maps"]);
 const calibrationRowSchema = z.object({
@@ -126,8 +136,16 @@ function exportRowFromProspect({ prospect, business }: Awaited<ReturnType<typeof
     website_status: business.websiteStatus, website_quality: business.websiteQuality, google_maps_url: business.googleMapsUrl, google_rating: business.rating, google_review_count: business.reviewCount, social_profiles: business.socialProfiles,
     whatsapp: business.whatsappUrl, booking: business.bookingUrl, opportunity_score: prospect.opportunityScore, business_attractiveness_score: prospect.businessAttractivenessScore, digital_opportunity_score: prospect.digitalOpportunityScore,
     website_opportunity_score: prospect.websiteOpportunityScore, commercial_potential_score: prospect.commercialPotentialScore, lead_potential_score: prospect.leadPotentialScore, urgency_score: prospect.urgencyScore,
-    priority: prospect.priority, opportunity_types: prospect.opportunityTypes, opportunity_reasons: prospect.scoreReasons, ai_summary: prospect.analysisSummary, source: business.source, date_analyzed: prospect.lastCheckedAt.toISOString(),
+    priority: prospect.priority, commercial_status: prospect.status, next_action: prospect.nextActionLabel, next_action_at: prospect.nextActionAt?.toISOString() ?? null, opportunity_types: prospect.opportunityTypes, opportunity_reasons: prospect.scoreReasons, ai_summary: prospect.analysisSummary, source: business.source, date_analyzed: prospect.lastCheckedAt.toISOString(),
   };
+}
+
+function asHandoffPolicy(policy: { minimumOpportunityScore: number; requireNextAction: number; requireDigitalEvidence: number }) {
+  return { minimumOpportunityScore: policy.minimumOpportunityScore, requireNextAction: Boolean(policy.requireNextAction), requireDigitalEvidence: Boolean(policy.requireDigitalEvidence) };
+}
+
+function handoffEligibilityFromProspect(item: Awaited<ReturnType<typeof listProspects>>[number], policy: ReturnType<typeof asHandoffPolicy>) {
+  return evaluateHandoffEligibility({ status: item.prospect.status, opportunityScore: item.prospect.opportunityScore, nextActionLabel: item.prospect.nextActionLabel, nextActionAt: item.prospect.nextActionAt, websiteStatus: item.business.websiteStatus, websiteQuality: item.business.websiteQuality }, policy);
 }
 
 export function renderTemplate(value: string | null, replacements: Record<string, string>) {
@@ -394,7 +412,17 @@ export const appRouter = router({
     filterByStatus: protectedProcedure.input(z.object({ status: runStatusSchema })).query(({ ctx, input }) => listProspectingRuns(ctx.user.id, 100).then(rows => rows.filter(row => row.status === input.status))),
   }),
   prospects: router({
-    list: protectedProcedure.input(z.object({ runId: z.number().int().positive().optional(), priority: prioritySchema.optional(), websiteStatus: websiteStatusSchema.optional(), minimumScore: z.number().int().min(0).max(100).optional(), query: z.string().trim().max(160).optional(), limit: z.number().int().min(1).max(500).optional() }).optional()).query(({ ctx, input }) => listProspects(ctx.user.id, input)),
+    list: protectedProcedure.input(z.object({ runId: z.number().int().positive().optional(), priority: prioritySchema.optional(), status: prospectStatusSchema.optional(), dueState: dueStateSchema.optional(), readiness: z.enum(["ready", "not_ready", "queued"]).optional(), websiteStatus: websiteStatusSchema.optional(), minimumScore: z.number().int().min(0).max(100).optional(), query: z.string().trim().max(160).optional(), limit: z.number().int().min(1).max(500).optional() }).optional()).query(async ({ ctx, input }) => {
+      const [rows, policy] = await Promise.all([listProspects(ctx.user.id, input), getOrCreateHandoffPolicy(ctx.user.id)]);
+      const enriched = rows.map(item => ({ ...item, handoffEligibility: handoffEligibilityFromProspect(item, asHandoffPolicy(policy)) }));
+      if (input?.readiness === "ready") return enriched.filter(item => item.handoffEligibility.eligible);
+      if (input?.readiness === "not_ready") return enriched.filter(item => !item.handoffEligibility.eligible);
+      if (input?.readiness === "queued") {
+        const queued = new Set((await listProspectHandoffs(ctx.user.id)).map(item => item.prospect.id));
+        return enriched.filter(item => queued.has(item.prospect.id));
+      }
+      return enriched;
+    }),
     get: protectedProcedure.input(z.object({ prospectId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       const value = await getProspect(ctx.user.id, input.prospectId);
       if (!value) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
@@ -411,6 +439,7 @@ export const appRouter = router({
       return updated;
     }),
     activities: protectedProcedure.input(z.object({ prospectId: z.number().int().positive() })).query(({ ctx, input }) => listProspectActivities(ctx.user.id, input.prospectId)),
+    reminders: protectedProcedure.query(({ ctx }) => getProspectReminders(ctx.user.id)),
     exportRows: protectedProcedure.input(z.object({ prospectIds: z.array(z.number().int().positive()).min(1).max(500) })).query(async ({ ctx, input }) => {
       const all = await listProspects(ctx.user.id, { limit: 5000 });
       const selected = all.filter(item => input.prospectIds.includes(item.prospect.id));
@@ -465,6 +494,51 @@ export const appRouter = router({
       }
     }),
     analyses: protectedProcedure.input(z.object({ prospectId: z.number().int().positive() })).query(({ ctx, input }) => listWebsiteAnalyses(ctx.user.id, input.prospectId)),
+  }),
+  handoffs: router({
+    policy: protectedProcedure.query(({ ctx }) => getOrCreateHandoffPolicy(ctx.user.id)),
+    updatePolicy: protectedProcedure.input(z.object({ minimumOpportunityScore: z.number().int().min(0).max(100).optional(), requireNextAction: z.boolean().optional(), requireDigitalEvidence: z.boolean().optional(), destinationLabel: z.string().trim().min(2).max(160).optional() })).mutation(({ ctx, input }) => updateHandoffPolicy(ctx.user.id, { ...(input.minimumOpportunityScore === undefined ? {} : { minimumOpportunityScore: input.minimumOpportunityScore }), ...(input.destinationLabel === undefined ? {} : { destinationLabel: input.destinationLabel }), ...(input.requireNextAction === undefined ? {} : { requireNextAction: input.requireNextAction ? 1 : 0 }), ...(input.requireDigitalEvidence === undefined ? {} : { requireDigitalEvidence: input.requireDigitalEvidence ? 1 : 0 }) })),
+    list: protectedProcedure.input(z.object({ status: handoffStatusSchema.optional() }).optional()).query(({ ctx, input }) => listProspectHandoffs(ctx.user.id, input?.status)),
+    eligibility: protectedProcedure.input(z.object({ prospectId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      const [item, policy, handoff] = await Promise.all([getProspect(ctx.user.id, input.prospectId), getOrCreateHandoffPolicy(ctx.user.id), getProspectHandoff(ctx.user.id, input.prospectId)]);
+      if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
+      return { eligibility: handoffEligibilityFromProspect(item, asHandoffPolicy(policy)), handoff, policy };
+    }),
+    queue: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), note: z.string().trim().max(2000).nullable().optional() })).mutation(async ({ ctx, input }) => {
+      const [item, policy] = await Promise.all([getProspect(ctx.user.id, input.prospectId), getOrCreateHandoffPolicy(ctx.user.id)]);
+      if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
+      const eligibility = handoffEligibilityFromProspect(item, asHandoffPolicy(policy));
+      if (!eligibility.eligible) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Aún no se puede pasar a auditoría: ${eligibility.reasons.join(" ")}` });
+      const handoff = await upsertProspectHandoff({ ownerId: ctx.user.id, prospectId: input.prospectId, destinationLabel: policy.destinationLabel, eligibilitySnapshot: eligibility.criteria, note: input.note ?? null });
+      await createProspectActivity({ ownerId: ctx.user.id, prospectId: input.prospectId, action: "handoff_queued", note: "Oportunidad incorporada a la cola de auditoría web.", nextStatus: item.prospect.status });
+      return handoff;
+    }),
+    approve: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), note: z.string().trim().max(2000).nullable().optional() })).mutation(async ({ ctx, input }) => {
+      const handoff = await updateProspectHandoff(ctx.user.id, input.prospectId, { status: "approved", approvedAt: new Date(), note: input.note ?? null });
+      if (!handoff) throw new TRPCError({ code: "NOT_FOUND", message: "Primero incorpora esta oportunidad a la cola de auditoría." });
+      await createProspectActivity({ ownerId: ctx.user.id, prospectId: input.prospectId, action: "handoff_approved", note: "La oportunidad fue aprobada para preparar el expediente de auditoría." });
+      return handoff;
+    }),
+    dossier: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), markExported: z.boolean().default(false) })).mutation(async ({ ctx, input }) => {
+      const [item, policy, analyses, handoff] = await Promise.all([getProspect(ctx.user.id, input.prospectId), getOrCreateHandoffPolicy(ctx.user.id), listWebsiteAnalyses(ctx.user.id, input.prospectId), getProspectHandoff(ctx.user.id, input.prospectId)]);
+      if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró el prospecto." });
+      if (!handoff || !["approved", "package_exported", "delivered"].includes(handoff.status)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Aprueba primero la oportunidad en la cola de auditoría." });
+      const eligibility = handoffEligibilityFromProspect(item, asHandoffPolicy(policy));
+      const dossier = buildAuditDossier({ business: item.business, prospect: item.prospect, eligibility, analyses });
+      if (input.markExported && handoff.status !== "delivered") {
+        await updateProspectHandoff(ctx.user.id, input.prospectId, { status: "package_exported", packageExportedAt: new Date(), eligibilitySnapshot: eligibility.criteria });
+        await createProspectActivity({ ownerId: ctx.user.id, prospectId: input.prospectId, action: "audit_package_exported", note: "Expediente de auditoría exportado para revisión externa." });
+      }
+      return { filename: `nexo-expediente-${item.business.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || input.prospectId}.json`, dossier };
+    }),
+    markDelivered: protectedProcedure.input(z.object({ prospectId: z.number().int().positive(), externalReference: z.string().trim().min(2).max(512), note: z.string().trim().max(2000).nullable().optional() })).mutation(async ({ ctx, input }) => {
+      if (!ENV.handoffConnectorEnabled || !ENV.handoffWebhookUrl) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "El SaaS externo permanece como placeholder inactivo. Exporta el expediente y registra la entrega manual solo después de configurar y habilitar el conector." });
+      const handoff = await updateProspectHandoff(ctx.user.id, input.prospectId, { status: "delivered", deliveredAt: new Date(), externalReference: input.externalReference, note: input.note ?? null });
+      if (!handoff) throw new TRPCError({ code: "NOT_FOUND", message: "No se encontró la oportunidad en la cola de auditoría." });
+      await createProspectActivity({ ownerId: ctx.user.id, prospectId: input.prospectId, action: "handoff_delivered", note: "Se registró la entrega al SaaS externo configurado." });
+      return handoff;
+    }),
+    connectorStatus: protectedProcedure.query(() => ({ enabled: ENV.handoffConnectorEnabled && Boolean(ENV.handoffWebhookUrl), state: ENV.handoffConnectorEnabled && ENV.handoffWebhookUrl ? "activo" : "placeholder_inactivo", instructions: "Configura NEXO_HANDOFF_WEBHOOK_URL y NEXO_ENABLE_HANDOFF_CONNECTOR=true cuando el SaaS externo esté definido." })),
   }),
   templates: router({
     list: protectedProcedure.query(({ ctx }) => getOrCreateQualificationTemplates(ctx.user.id)),
