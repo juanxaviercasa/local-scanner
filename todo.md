@@ -61,8 +61,8 @@
 - [x] Implementar el análisis de calibración y la aplicación controlada de pesos de puntuación desde datos CSV importados.
 - [x] Añadir estados comerciales estructurados, fecha de siguiente acción y actividad de seguimiento para prospectos cualificados.
 - [x] Validar con pruebas automatizadas y revisión visual los flujos de calibración CSV y seguimiento comercial.
-- [ ] Verificar visualmente la recomendación de calibración con un CSV de cierres autorizado cargado por el operador antes de aplicar pesos.
-- [ ] Verificar visualmente en una ficha real el estado comercial, la próxima acción y la bitácora de seguimiento.
+- [x] Verificar visualmente la recomendación de calibración con un CSV de cierres de demostración autorizado por el operador antes de aplicar pesos.
+- [x] Verificar visualmente en una ficha de demostración el estado comercial, la próxima acción y la bitácora de seguimiento.
 - [x] Crear datos de demostración claramente identificados, sin reseñas ni calificaciones ficticias, para validar los flujos pendientes.
 - [x] Verificar visualmente con los datos de demostración la recomendación CSV y la bitácora de seguimiento comercial.
 - [x] Crear datos de demostración claramente identificados, sin reseñas ni calificaciones ficticias, para validar los flujos pendientes.
